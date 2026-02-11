@@ -2,12 +2,17 @@ package telemetry
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -33,15 +38,34 @@ var (
 	ServiceVersion = "dev"
 
 	exporterFactory = func(ctx context.Context, endpoint string) (sdktrace.SpanExporter, error) {
-		return otlptracehttp.New(ctx, otlptracehttp.WithEndpointURL(endpoint))
+		opts := []otlptracehttp.Option{otlptracehttp.WithEndpointURL(endpoint)}
+		certPath := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_CERTIFICATE"))
+		if certPath != "" {
+			tlsConfig, err := tlsConfigFromCertificate(certPath)
+			if err != nil {
+				return nil, err
+			}
+			opts = append(opts, otlptracehttp.WithTLSClientConfig(tlsConfig))
+		}
+		return otlptracehttp.New(ctx, opts...)
 	}
+
+	endpointOverrideMu sync.RWMutex
+	endpointOverride   string
 )
 
 // Init configures OpenTelemetry with OTLP HTTP exporter, resource attributes, and batch processing.
 func Init(ctx context.Context) (func(), error) {
-	exporter, err := exporterFactory(ctx, resolveEndpoint())
+	endpoint := resolveEndpoint()
+	exporter, err := exporterFactory(ctx, endpoint)
 	if err != nil {
-		return nil, fmt.Errorf("create OTLP exporter: %w", err)
+		fmt.Fprintf(
+			os.Stderr,
+			"warning: OTLP exporter unavailable for %s (%v); falling back to console exporter\n",
+			endpoint,
+			err,
+		)
+		exporter = &stderrSpanExporter{out: os.Stderr}
 	}
 
 	res, err := resource.New(
@@ -81,11 +105,77 @@ func Init(ctx context.Context) (func(), error) {
 }
 
 func resolveEndpoint() string {
+	endpointOverrideMu.RLock()
+	override := endpointOverride
+	endpointOverrideMu.RUnlock()
+	if strings.TrimSpace(override) != "" {
+		return strings.TrimSpace(override)
+	}
+
 	endpoint := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
 	if endpoint == "" {
-		return DefaultEndpoint
+		endpoint = endpointFromConfig()
+	}
+	if endpoint == "" {
+		endpoint = DefaultEndpoint
 	}
 	return endpoint
+}
+
+func endpointFromConfig() string {
+	homeDir, homeErr := os.UserHomeDir()
+	workDir, cwdErr := os.Getwd()
+	if homeErr != nil && cwdErr != nil {
+		return ""
+	}
+
+	paths := make([]string, 0, 2)
+	if homeErr == nil {
+		paths = append(paths, filepath.Join(homeDir, ".sc3", "config.toml"))
+	}
+	if cwdErr == nil {
+		paths = append(paths, filepath.Join(workDir, ".sc3", "config.toml"))
+	}
+
+	candidate := ""
+	for _, path := range paths {
+		value, err := endpointFromConfigPath(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: unable to read telemetry endpoint from %s: %v\n", path, err)
+			continue
+		}
+		if value != "" {
+			candidate = value
+		}
+	}
+	return candidate
+}
+
+type telemetryFileConfig struct {
+	OTEL struct {
+		Endpoint *string `toml:"endpoint"`
+	} `toml:"otel"`
+	OTLPEndpoint *string `toml:"otel_endpoint"`
+}
+
+func endpointFromConfigPath(path string) (string, error) {
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("stat config path: %w", err)
+	}
+	var decoded telemetryFileConfig
+	if _, err := toml.DecodeFile(path, &decoded); err != nil {
+		return "", fmt.Errorf("decode config file: %w", err)
+	}
+	if decoded.OTEL.Endpoint != nil {
+		return strings.TrimSpace(*decoded.OTEL.Endpoint), nil
+	}
+	if decoded.OTLPEndpoint != nil {
+		return strings.TrimSpace(*decoded.OTLPEndpoint), nil
+	}
+	return "", nil
 }
 
 func resolveEnvironment() string {
@@ -105,10 +195,66 @@ func resolveServiceVersion() string {
 	return version
 }
 
+// SetEndpointOverride sets a process-local endpoint override (used by CLI flag precedence).
+func SetEndpointOverride(endpoint string) {
+	endpointOverrideMu.Lock()
+	defer endpointOverrideMu.Unlock()
+	endpointOverride = strings.TrimSpace(endpoint)
+}
+
+func tlsConfigFromCertificate(path string) (*tls.Config, error) {
+	// #nosec G304 -- certificate path is explicitly provided by OTEL_EXPORTER_OTLP_CERTIFICATE configuration.
+	certPEM, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read OTEL certificate %q: %w", path, err)
+	}
+	pool := x509.NewCertPool()
+	if ok := pool.AppendCertsFromPEM(certPEM); !ok {
+		return nil, fmt.Errorf("parse OTEL certificate %q: no certificates found", path)
+	}
+	return &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}, nil
+}
+
+type stderrSpanExporter struct {
+	out io.Writer
+}
+
+func (e *stderrSpanExporter) ExportSpans(_ context.Context, spans []sdktrace.ReadOnlySpan) error {
+	if e == nil || e.out == nil {
+		return nil
+	}
+	for _, span := range spans {
+		duration := span.EndTime().Sub(span.StartTime()).Round(time.Millisecond)
+		if _, err := fmt.Fprintf(e.out, "[SPAN] %s %s %v\n", span.Name(), duration, span.Status().Code); err != nil {
+			return err
+		}
+		for _, event := range span.Events() {
+			if _, err := fmt.Fprintf(e.out, "  [EVENT] %s\n", event.Name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (e *stderrSpanExporter) Shutdown(_ context.Context) error {
+	return nil
+}
+
 func setExporterFactoryForTest(factory func(context.Context, string) (sdktrace.SpanExporter, error)) func() {
 	previous := exporterFactory
 	exporterFactory = factory
 	return func() {
 		exporterFactory = previous
+	}
+}
+
+func setEndpointOverrideForTest(value string) func() {
+	endpointOverrideMu.RLock()
+	previous := endpointOverride
+	endpointOverrideMu.RUnlock()
+	SetEndpointOverride(value)
+	return func() {
+		SetEndpointOverride(previous)
 	}
 }

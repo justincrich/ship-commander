@@ -65,10 +65,11 @@ var (
 	newRuntimeLoggerFn = func(ctx context.Context, options ...logging.Option) (*logging.RuntimeLogger, error) {
 		return logging.New(ctx, options...)
 	}
-	initTelemetryFn             = telemetry.Init
-	setInvariantChecksEnabledFn = invariants.SetEnabled
-	newRootCommandFn            = newRootCommand
-	startCommandSpanFn          = func(ctx context.Context, commandName string, attrs []attribute.KeyValue) (context.Context, commandSpan) {
+	setTelemetryEndpointOverrideFn = telemetry.SetEndpointOverride
+	initTelemetryFn                = telemetry.Init
+	setInvariantChecksEnabledFn    = invariants.SetEnabled
+	newRootCommandFn               = newRootCommand
+	startCommandSpanFn             = func(ctx context.Context, commandName string, attrs []attribute.KeyValue) (context.Context, commandSpan) {
 		spanCtx, span := otel.Tracer("sc3/command").Start(
 			ctx,
 			"sc3."+commandName,
@@ -86,6 +87,9 @@ func main() {
 }
 
 func run(ctx context.Context, args []string) error {
+	setTelemetryEndpointOverrideFn(resolveOTelEndpointFlag(args))
+	defer setTelemetryEndpointOverrideFn("")
+
 	telemetry.ServiceVersion = Version
 	shutdownTelemetry, err := initTelemetryFn(ctx)
 	if err != nil {
@@ -176,6 +180,7 @@ func newRootCommand(ctx context.Context, cfg *config.Config, logger *log.Logger)
 
 	root.SetVersionTemplate("{{printf \"%s\\n\" .Version}}")
 	root.PersistentFlags().BoolP("debug", "d", false, "Enable debug logging to stderr for non-TUI commands")
+	root.PersistentFlags().String("otel-endpoint", "", "Override OTLP endpoint URL (e.g. http://localhost:4318)")
 	root.PersistentFlags().Bool("skip-invariant-checks", false, "Disable invariant violation telemetry checks (emergency only)")
 	root.AddCommand(
 		newLeafCommand("init", "Initialize Ship Commander 3 project state", logger),
@@ -259,6 +264,22 @@ func hasSkipInvariantChecksFlag(args []string) bool {
 		}
 	}
 	return enabled
+}
+
+func resolveOTelEndpointFlag(args []string) string {
+	for i := 0; i < len(args); i++ {
+		trimmed := strings.TrimSpace(args[i])
+		switch {
+		case strings.HasPrefix(trimmed, "--otel-endpoint="):
+			return strings.TrimSpace(strings.TrimPrefix(trimmed, "--otel-endpoint="))
+		case trimmed == "--otel-endpoint":
+			if i+1 >= len(args) {
+				return ""
+			}
+			return strings.TrimSpace(args[i+1])
+		}
+	}
+	return ""
 }
 
 func parseTruthyFlag(value string) bool {

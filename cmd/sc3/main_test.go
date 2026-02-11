@@ -132,6 +132,27 @@ func TestHasSkipInvariantChecksFlag(t *testing.T) {
 	}
 }
 
+func TestResolveOTelEndpointFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "inline value", args: []string{"--otel-endpoint=https://otel.example.com:4318", "plan"}, want: "https://otel.example.com:4318"},
+		{name: "separate value", args: []string{"--otel-endpoint", "http://localhost:4318", "plan"}, want: "http://localhost:4318"},
+		{name: "unset", args: []string{"plan"}, want: ""},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveOTelEndpointFlag(tc.args); got != tc.want {
+				t.Fatalf("resolveOTelEndpointFlag(%v) = %q, want %q", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRedactArgs(t *testing.T) {
 	input := []string{
 		"execute",
@@ -447,9 +468,43 @@ func TestRunSetsInvariantChecksFromFlags(t *testing.T) {
 	}
 }
 
+func TestRunSetsTelemetryEndpointOverrideFromFlags(t *testing.T) {
+	restore := snapshotRunHooks()
+	defer restore()
+
+	initTelemetryFn = func(context.Context) (func(), error) { return func() {}, nil }
+	loadConfigFn = func(context.Context) (*config.Config, error) { return testRuntimeConfig(), nil }
+	newRuntimeLoggerFn = func(context.Context, ...logging.Option) (*logging.RuntimeLogger, error) {
+		return &logging.RuntimeLogger{Logger: testLogger()}, nil
+	}
+	startCommandSpanFn = func(ctx context.Context, _ string, _ []attribute.KeyValue) (context.Context, commandSpan) {
+		return ctx, newFakeCommandSpan()
+	}
+
+	values := make([]string, 0, 2)
+	setTelemetryEndpointOverrideFn = func(endpoint string) {
+		values = append(values, endpoint)
+	}
+
+	if err := run(context.Background(), []string{"--otel-endpoint=https://collector.example.com:4318", "plan"}); err != nil {
+		t.Fatalf("run with otel endpoint: %v", err)
+	}
+
+	if len(values) < 2 {
+		t.Fatalf("expected override setter to be called at least twice (set + reset), got %d", len(values))
+	}
+	if values[0] != "https://collector.example.com:4318" {
+		t.Fatalf("first endpoint override = %q, want https://collector.example.com:4318", values[0])
+	}
+	if values[len(values)-1] != "" {
+		t.Fatalf("final endpoint override reset = %q, want empty string", values[len(values)-1])
+	}
+}
+
 func snapshotRunHooks() func() {
 	prevLoadConfig := loadConfigFn
 	prevNewLogger := newRuntimeLoggerFn
+	prevSetTelemetryEndpointOverride := setTelemetryEndpointOverrideFn
 	prevInitTelemetry := initTelemetryFn
 	prevSetInvariantChecks := setInvariantChecksEnabledFn
 	prevRootCommand := newRootCommandFn
@@ -458,6 +513,7 @@ func snapshotRunHooks() func() {
 	return func() {
 		loadConfigFn = prevLoadConfig
 		newRuntimeLoggerFn = prevNewLogger
+		setTelemetryEndpointOverrideFn = prevSetTelemetryEndpointOverride
 		initTelemetryFn = prevInitTelemetry
 		setInvariantChecksEnabledFn = prevSetInvariantChecks
 		newRootCommandFn = prevRootCommand
