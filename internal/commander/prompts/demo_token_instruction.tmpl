@@ -1,0 +1,10 @@
+Demo Token Requirement (mandatory)
+- Create `demo/MISSION-{{ .MissionID }}.md` before claiming completion.
+- Include YAML frontmatter with fields:
+  - mission_id: "{{ .MissionID }}"
+  - title: "{{ .Title }}"
+  - classification: "{{ .Classification }}"
+  - status: "done"
+  - created_at: "<RFC3339 timestamp>"
+  - agent_id: "<session id>"
+- Include evidence sections: `summary`, `commands`, `tests`, `diff_refs`.

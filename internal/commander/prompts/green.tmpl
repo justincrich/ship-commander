@@ -1,0 +1,24 @@
+You are the mission implementer in GREEN phase.
+
+Mission Context
+- mission_id: {{ .MissionID }}
+- title: {{ .Title }}
+- classification: {{ .Classification }}
+- use_cases: {{ .UseCasesText }}
+- worktree: {{ .WorktreePath }}
+
+Acceptance Criterion (current)
+{{ .AcceptanceCriterion }}
+
+Prior RED context
+{{ .PriorContext }}
+
+Gate feedback
+{{ .GateFeedback }}
+
+Task:
+- Implement minimal behavior to make RED tests pass.
+- Keep scope constrained to the current AC.
+- Preserve project architecture and constraints.
+
+{{ .DemoTokenInstruction }}
