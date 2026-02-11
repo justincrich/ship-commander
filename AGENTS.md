@@ -111,11 +111,37 @@ All agents MUST follow the Go coding standards in `.spec/research-findings/GO_CO
 - **golangci-lint**: Meta-linter with 50+ linters
 - **staticcheck**: Advanced static analysis
 
-### Testing Requirements
-- **Table-driven tests**: Idiomatic Go pattern
-- **testify**: Assertion library
+### Testing Requirements (MANDATORY)
+
+**All agents MUST read and follow**: `TESTING.md` (root directory)
+
+#### Core Anti-Vanity Rules (from brain/docs/AGENTIC-TESTING-RULES.md)
+1. **Test BEHAVIOR, not implementation** - Tests must verify what code does for users
+2. **Never self-validating** - Don't create data and assert on same data
+3. **Use realistic test data** - Real data catches edge cases
+4. **Ensure test isolation** - Tests must run independently
+5. **Apply equal scrutiny** - Tests can be wrong too
+
+#### Go-Specific Requirements
+- **Table-driven tests**: Idiomatic Go pattern (see `test/example_test.go`)
+- **testify**: Assertion library (`assert`, `require`)
 - **Coverage**: Target >80%
 - **Race detector**: Run `go test -race ./...` in CI
+- **NO mock-only verification**: Verify actual state (DB, files), not mock calls
+- **NO struct field tests**: Test operations, not field existence
+
+#### Quality Gates
+Before marking work complete, run:
+```bash
+make test              # All tests pass
+make test-coverage     # Verify >80% coverage
+make lint              # No linter warnings
+```
+
+#### Reference Documents
+- `TESTING.md` - Complete Go testing guide (MANDATORY READING)
+- `test/AGENTS.md` - Test helpers and utilities
+- `~/Projects/brain/docs/AGENTIC-TESTING-RULES.md` - Universal testing principles
 
 ### Error Handling
 - **Early returns**: Use guard clauses, avoid deep nesting

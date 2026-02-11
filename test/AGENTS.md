@@ -1,5 +1,25 @@
 # Test Package - Agent Guidance
 
+## ⚠️ MANDATORY READING BEFORE WRITING TESTS
+
+**ALL agents MUST read**: `.spec/GO-TESTING-GUIDELINES.md`
+
+This document contains:
+- **5 Test Integrity Rules** - Prevent vanity/self-validating tests
+- **Go-specific anti-patterns** - What NOT to do in Go tests
+- **Mocking strategy** - When to mock vs. use real implementations
+- **Test quality checklist** - Verify tests are valuable
+- **Given-When-Then template** - Structure tests for clarity
+
+### Quick Anti-Pattern Reference
+
+| ❌ VANITY (Don't Do) | ✅ VALUABLE (Do This) |
+|---------------------|---------------------|
+| Create struct, assert same fields | Verify DB state after operation |
+| `mock.AssertCalled()` | Use test DB, verify real persistence |
+| Test struct field exists | Test operation that uses the field |
+| Arbitrary test data | Realistic production-like data |
+
 ## Purpose
 
 This package provides shared testing utilities, fixtures, and examples for Ship Commander 3. It ensures consistency across all test files and demonstrates idiomatic Go testing patterns.
