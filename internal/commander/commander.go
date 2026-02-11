@@ -14,6 +14,7 @@ import (
 
 	"github.com/ship-commander/sc3/internal/admiral"
 	"github.com/ship-commander/sc3/internal/protocol"
+	"github.com/ship-commander/sc3/internal/telemetry"
 	"github.com/ship-commander/sc3/internal/telemetry/invariants"
 )
 
@@ -63,6 +64,8 @@ const (
 type Mission struct {
 	ID                         string
 	Title                      string
+	Harness                    string
+	Model                      string
 	Classification             string
 	ClassificationRationale    string
 	ClassificationCriteria     []string
@@ -507,16 +510,26 @@ func (c *Commander) dispatchImplementer(
 	worktreePath string,
 	waveIndex int,
 ) (DispatchResult, error) {
-	result, err := c.harness.DispatchImplementer(ctx, DispatchRequest{
+	dispatchCtx, llmCall := telemetry.StartLLMCall(ctx, telemetry.LLMCallRequest{
+		Operation: "dispatch_implementer",
+		ModelName: mission.Model,
+		Harness:   mission.Harness,
+		Prompt:    buildDispatchTelemetryPrompt(mission, waveIndex),
+	})
+
+	result, err := c.harness.DispatchImplementer(dispatchCtx, DispatchRequest{
 		Mission:          mission,
 		WorktreePath:     worktreePath,
 		WaveFeedback:     mission.WaveFeedback,
 		ReviewerFeedback: mission.ReviewFeedback,
 	})
 	if err != nil {
+		llmCall.RecordError("implementer_dispatch_error", err.Error(), mission.RevisionCount)
+		llmCall.End("", nil, err)
 		_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, fmt.Sprintf("dispatch failed: %v", err))
 		return DispatchResult{}, fmt.Errorf("dispatch implementer for %s: %w", mission.ID, err)
 	}
+	llmCall.End(result.SessionID, nil, nil)
 	return result, nil
 }
 
@@ -576,8 +589,17 @@ func (c *Commander) dispatchReviewerAndAwaitVerdict(
 		return ReviewVerdict{}, fmt.Errorf("build reviewer context for %s: %w", mission.ID, err)
 	}
 
-	reviewerResult, err := c.harness.DispatchReviewer(ctx, reviewerReq)
+	reviewCtx, llmCall := telemetry.StartLLMCall(ctx, telemetry.LLMCallRequest{
+		Operation: "dispatch_reviewer",
+		ModelName: mission.Model,
+		Harness:   mission.Harness,
+		Prompt:    buildReviewerTelemetryPrompt(mission, reviewerReq, waveIndex),
+	})
+
+	reviewerResult, err := c.harness.DispatchReviewer(reviewCtx, reviewerReq)
 	if err != nil {
+		llmCall.RecordError("reviewer_dispatch_error", err.Error(), mission.RevisionCount)
+		llmCall.End("", nil, err)
 		_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, fmt.Sprintf("reviewer dispatch failed: %v", err))
 		return ReviewVerdict{}, fmt.Errorf("dispatch reviewer for %s: %w", mission.ID, err)
 	}
@@ -585,19 +607,30 @@ func (c *Commander) dispatchReviewerAndAwaitVerdict(
 	reviewerSession := strings.TrimSpace(reviewerResult.SessionID)
 	implementerSession := strings.TrimSpace(implementerSessionID)
 	if reviewerSession == "" {
+		llmCall.RecordError("reviewer_session_invalid", "reviewer dispatch returned empty session id", mission.RevisionCount)
+		llmCall.End("", nil, errors.New("reviewer dispatch returned empty session id"))
 		_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, "reviewer dispatch returned empty session id")
 		return ReviewVerdict{}, fmt.Errorf("dispatch reviewer for %s: empty reviewer session id", mission.ID)
 	}
 	if implementerSession != "" && reviewerSession == implementerSession {
+		llmCall.RecordError(
+			"reviewer_session_invalid",
+			"reviewer must be a different ensign session than implementer",
+			mission.RevisionCount,
+		)
+		llmCall.End("", nil, errors.New("reviewer and implementer session ids must differ"))
 		_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, "reviewer must be a different ensign session than implementer")
 		return ReviewVerdict{}, fmt.Errorf("dispatch reviewer for %s: reviewer and implementer session ids must differ", mission.ID)
 	}
 
-	verdict, err := c.awaitReviewVerdict(ctx, mission.ID, implementerSession, reviewerSession)
+	verdict, err := c.awaitReviewVerdict(reviewCtx, mission.ID, implementerSession, reviewerSession)
 	if err != nil {
+		llmCall.RecordError("review_verdict_wait_error", err.Error(), mission.RevisionCount)
+		llmCall.End(reviewerSession, nil, err)
 		_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, fmt.Sprintf("review verdict wait failed: %v", err))
 		return ReviewVerdict{}, fmt.Errorf("await review verdict for %s: %w", mission.ID, err)
 	}
+	llmCall.End(fmt.Sprintf("%s:%s", reviewerSession, verdict.Decision), nil, nil)
 	return verdict, nil
 }
 
@@ -1034,6 +1067,28 @@ func classifyDemoTokenHaltReason(err error) HaltReason {
 
 func isStandardOpsMission(mission Mission) bool {
 	return strings.EqualFold(strings.TrimSpace(mission.Classification), MissionClassificationStandardOps)
+}
+
+func buildDispatchTelemetryPrompt(mission Mission, waveIndex int) string {
+	return fmt.Sprintf(
+		"mission_id=%s title=%s wave=%d wave_feedback=%s reviewer_feedback=%s",
+		strings.TrimSpace(mission.ID),
+		strings.TrimSpace(mission.Title),
+		waveIndex,
+		strings.TrimSpace(mission.WaveFeedback),
+		strings.TrimSpace(mission.ReviewFeedback),
+	)
+}
+
+func buildReviewerTelemetryPrompt(mission Mission, req ReviewerDispatchRequest, waveIndex int) string {
+	return fmt.Sprintf(
+		"mission_id=%s title=%s wave=%d gate_evidence=%d acceptance_criteria=%d",
+		strings.TrimSpace(mission.ID),
+		strings.TrimSpace(mission.Title),
+		waveIndex,
+		len(req.GateEvidence),
+		len(req.AcceptanceCriteria),
+	)
 }
 
 func (c *Commander) resolveAdmiralDecision(

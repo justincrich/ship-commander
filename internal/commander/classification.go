@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ship-commander/sc3/internal/telemetry"
 	"gopkg.in/yaml.v3"
 )
 
@@ -144,22 +145,34 @@ func (c *Classifier) ClassifyMission(ctx context.Context, input ClassificationCo
 		return ClassificationResult{}, err
 	}
 
-	rawResponse, err := c.invoker.ClassifyMission(ctx, ClassificationRequest{
+	classifyCtx, llmCall := telemetry.StartLLMCall(ctx, telemetry.LLMCallRequest{
+		Operation: "mission_classification",
+		ModelName: input.Model,
+		Harness:   input.Harness,
+		Prompt:    prompt,
+	})
+
+	rawResponse, err := c.invoker.ClassifyMission(classifyCtx, ClassificationRequest{
 		Harness: input.Harness,
 		Model:   input.Model,
 		Prompt:  prompt,
 	})
 	if err != nil {
+		llmCall.RecordError("classification_invoke_error", err.Error(), 0)
+		llmCall.End("", nil, err)
 		return ClassificationResult{}, fmt.Errorf("invoke classification harness: %w", err)
 	}
 
 	result, err := parseClassificationYAML(input, rawResponse)
 	if err != nil {
+		llmCall.RecordError("classification_parse_error", err.Error(), 0)
+		llmCall.End(rawResponse, nil, err)
 		return ClassificationResult{}, err
 	}
 	result.Harness = input.Harness
 	result.Model = input.Model
 	result.RawYAMLResponse = rawResponse
+	llmCall.End(rawResponse, nil, nil)
 
 	if result.RequiresAdmiralReview() {
 		return result, &LowConfidenceClassificationError{Result: result}

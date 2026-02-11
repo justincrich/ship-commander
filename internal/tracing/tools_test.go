@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ship-commander/sc3/internal/telemetry"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -168,6 +169,32 @@ func TestExecuteToolSequentialRunsPreserveParentContextAndOrder(t *testing.T) {
 	}
 }
 
+func TestExecuteToolAddsLLMToolEventWhenLLMContextIsPresent(t *testing.T) {
+	spanRecorder := installSpanRecorder(t)
+	workdir := t.TempDir()
+
+	ctx, llmCall := telemetry.StartLLMCall(context.Background(), telemetry.LLMCallRequest{
+		ModelName: "gpt-5",
+		Harness:   "codex",
+		Prompt:    "run shell command",
+	})
+
+	if _, _, _, err := ExecuteTool(ctx, "sh", []string{"-c", "echo traced"}, workdir); err != nil {
+		t.Fatalf("execute tool: %v", err)
+	}
+	llmCall.End("ok", nil, nil)
+
+	llmSpan := findNamedSpan(t, spanRecorder.Ended(), "llm.call")
+	toolEvent := findEvent(t, llmSpan.Events(), "llm.tool_call")
+
+	if got := getStringAttr(toolEvent.Attributes, "tool_name"); got != "sh" {
+		t.Fatalf("tool_name = %q, want sh", got)
+	}
+	if got := getIntAttr(llmSpan.Attributes(), "tool_calls_count"); got != 1 {
+		t.Fatalf("tool_calls_count = %d, want 1", got)
+	}
+}
+
 func installSpanRecorder(t *testing.T) *tracetest.SpanRecorder {
 	t.Helper()
 
@@ -194,6 +221,17 @@ func findToolExecSpan(t *testing.T, spans []sdktrace.ReadOnlySpan) sdktrace.Read
 		}
 	}
 	t.Fatalf("tool.exec span not found in %d spans", len(spans))
+	return nil
+}
+
+func findNamedSpan(t *testing.T, spans []sdktrace.ReadOnlySpan, name string) sdktrace.ReadOnlySpan {
+	t.Helper()
+	for _, span := range spans {
+		if span.Name() == name {
+			return span
+		}
+	}
+	t.Fatalf("span %q not found in %d spans", name, len(spans))
 	return nil
 }
 

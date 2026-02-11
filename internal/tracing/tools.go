@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ship-commander/sc3/internal/telemetry"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -67,6 +68,7 @@ func ExecuteTool(
 	exitCode := resolveExitCode(cmd, err, ctx)
 	stdoutText := strings.TrimSpace(stdout.String())
 	stderrText := strings.TrimSpace(stderr.String())
+	duration := time.Since(started)
 
 	span.SetAttributes(attribute.Int("exit_code", exitCode))
 	if strings.EqualFold(toolName, "git") {
@@ -93,11 +95,17 @@ func ExecuteTool(
 	}
 
 	if err != nil {
+		if llmCall := telemetry.LLMCallFromContext(ctx); llmCall != nil {
+			llmCall.RecordToolCall(toolName, duration, false)
+		}
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		return exitCode, stdoutText, stderrText, err
 	}
 
+	if llmCall := telemetry.LLMCallFromContext(ctx); llmCall != nil {
+		llmCall.RecordToolCall(toolName, duration, true)
+	}
 	span.SetStatus(codes.Ok, "tool command completed")
 	return exitCode, stdoutText, stderrText, nil
 }
