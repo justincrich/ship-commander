@@ -21,6 +21,12 @@ type ViewID string
 const (
 	// ViewFleetOverview is the default landing screen.
 	ViewFleetOverview ViewID = "fleet_overview"
+	// ViewShipBridge is the per-ship execution dashboard.
+	ViewShipBridge ViewID = "ship_bridge"
+	// ViewMissionDetail is the mission drill-down view.
+	ViewMissionDetail ViewID = "mission_detail"
+	// ViewAgentDetail is the agent drill-down view.
+	ViewAgentDetail ViewID = "agent_detail"
 )
 
 // LayoutMode identifies responsive AppShell layout mode.
