@@ -11,8 +11,10 @@ import (
 )
 
 func TestRootCommandVersionFlag(t *testing.T) {
-	t.Parallel()
-
+	originalVersion := Version
+	defer func() {
+		Version = originalVersion
+	}()
 	Version = "v0.1.0-test"
 	cmd := newRootCommand(context.Background(), &config.Config{}, testLogger())
 
@@ -32,8 +34,6 @@ func TestRootCommandVersionFlag(t *testing.T) {
 }
 
 func TestRootCommandHelpListsExpectedSubcommands(t *testing.T) {
-	t.Parallel()
-
 	cmd := newRootCommand(context.Background(), &config.Config{}, testLogger())
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
