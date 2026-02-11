@@ -136,6 +136,38 @@ func TestExecuteToolGitDiffSetsOperationAndChangedFiles(t *testing.T) {
 	}
 }
 
+func TestExecuteToolSequentialRunsPreserveParentContextAndOrder(t *testing.T) {
+	spanRecorder := installSpanRecorder(t)
+	workdir := t.TempDir()
+
+	parentCtx, parentSpan := otel.Tracer("trace-test-parent").Start(context.Background(), "parent")
+
+	if _, _, _, err := ExecuteTool(parentCtx, "sh", []string{"-c", "echo one"}, workdir); err != nil {
+		t.Fatalf("execute first tool: %v", err)
+	}
+	if _, _, _, err := ExecuteTool(parentCtx, "sh", []string{"-c", "echo two"}, workdir); err != nil {
+		t.Fatalf("execute second tool: %v", err)
+	}
+	parentSpan.End()
+
+	toolSpans := collectToolExecSpans(spanRecorder.Ended())
+	if len(toolSpans) < 2 {
+		t.Fatalf("tool.exec span count = %d, want at least 2", len(toolSpans))
+	}
+	first := toolSpans[0]
+	second := toolSpans[1]
+
+	if first.Parent().SpanID() != parentSpan.SpanContext().SpanID() {
+		t.Fatalf("first span parent = %s, want %s", first.Parent().SpanID(), parentSpan.SpanContext().SpanID())
+	}
+	if second.Parent().SpanID() != parentSpan.SpanContext().SpanID() {
+		t.Fatalf("second span parent = %s, want %s", second.Parent().SpanID(), parentSpan.SpanContext().SpanID())
+	}
+	if second.StartTime().Before(first.StartTime()) {
+		t.Fatalf("second span start %s before first span start %s", second.StartTime(), first.StartTime())
+	}
+}
+
 func installSpanRecorder(t *testing.T) *tracetest.SpanRecorder {
 	t.Helper()
 
@@ -163,6 +195,16 @@ func findToolExecSpan(t *testing.T, spans []sdktrace.ReadOnlySpan) sdktrace.Read
 	}
 	t.Fatalf("tool.exec span not found in %d spans", len(spans))
 	return nil
+}
+
+func collectToolExecSpans(spans []sdktrace.ReadOnlySpan) []sdktrace.ReadOnlySpan {
+	toolSpans := make([]sdktrace.ReadOnlySpan, 0, len(spans))
+	for _, span := range spans {
+		if span.Name() == "tool.exec" {
+			toolSpans = append(toolSpans, span)
+		}
+	}
+	return toolSpans
 }
 
 func getStringAttr(attrs []attribute.KeyValue, key string) string {
