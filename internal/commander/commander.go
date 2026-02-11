@@ -14,14 +14,17 @@ const (
 	EventMissionCompleted = "MISSION_COMPLETED"
 	// EventMissionHalted is emitted when a mission fails dispatch or verification.
 	EventMissionHalted = "MISSION_HALTED"
+	// MissionClassificationStandardOps routes mission execution through the standard implementation fast path.
+	MissionClassificationStandardOps = "STANDARD_OPS"
 )
 
 // Mission is an executable mission in an approved manifest.
 type Mission struct {
-	ID          string
-	Title       string
-	DependsOn   []string
-	SurfaceArea []string
+	ID             string
+	Title          string
+	Classification string
+	DependsOn      []string
+	SurfaceArea    []string
 }
 
 // Slug returns a URL-safe slug for branch naming.
@@ -77,6 +80,12 @@ type Harness interface {
 // Verifier verifies mission output independently from the implementer agent.
 type Verifier interface {
 	Verify(ctx context.Context, mission Mission, worktreePath string) error
+	VerifyImplement(ctx context.Context, mission Mission, worktreePath string) error
+}
+
+// DemoTokenValidator validates a mission's demo token before completion.
+type DemoTokenValidator interface {
+	Validate(ctx context.Context, mission Mission, worktreePath string) error
 }
 
 // EventPublisher publishes protocol events for mission status changes.
@@ -96,6 +105,7 @@ type Commander struct {
 	locks         SurfaceLocker
 	harness       Harness
 	verifier      Verifier
+	demoTokens    DemoTokenValidator
 	events        EventPublisher
 	wipLimit      int
 	now           func() time.Time
@@ -108,6 +118,7 @@ func New(
 	locks SurfaceLocker,
 	harness Harness,
 	verifier Verifier,
+	demoTokens DemoTokenValidator,
 	events EventPublisher,
 	cfg CommanderConfig,
 ) (*Commander, error) {
@@ -126,6 +137,9 @@ func New(
 	if verifier == nil {
 		return nil, errors.New("verifier is required")
 	}
+	if demoTokens == nil {
+		return nil, errors.New("demo token validator is required")
+	}
 	if events == nil {
 		return nil, errors.New("event publisher is required")
 	}
@@ -139,6 +153,7 @@ func New(
 		locks:         locks,
 		harness:       harness,
 		verifier:      verifier,
+		demoTokens:    demoTokens,
 		events:        events,
 		wipLimit:      cfg.WIPLimit,
 		now:           time.Now,
@@ -292,15 +307,38 @@ func (c *Commander) runMission(ctx context.Context, waveIndex int, mission Missi
 		return fmt.Errorf("dispatch implementer for %s: %w", mission.ID, err)
 	}
 
-	if err := c.verifier.Verify(ctx, mission, worktreePath); err != nil {
-		_ = c.publish(ctx, Event{
-			Type:      EventMissionHalted,
-			MissionID: mission.ID,
-			WaveIndex: waveIndex,
-			Timestamp: c.now().UTC(),
-			Message:   fmt.Sprintf("verification failed: %v", err),
-		})
-		return fmt.Errorf("verify mission %s: %w", mission.ID, err)
+	if isStandardOpsMission(mission) {
+		if err := c.verifier.VerifyImplement(ctx, mission, worktreePath); err != nil {
+			_ = c.publish(ctx, Event{
+				Type:      EventMissionHalted,
+				MissionID: mission.ID,
+				WaveIndex: waveIndex,
+				Timestamp: c.now().UTC(),
+				Message:   fmt.Sprintf("verification failed: %v", err),
+			})
+			return fmt.Errorf("verify implement mission %s: %w", mission.ID, err)
+		}
+		if err := c.demoTokens.Validate(ctx, mission, worktreePath); err != nil {
+			_ = c.publish(ctx, Event{
+				Type:      EventMissionHalted,
+				MissionID: mission.ID,
+				WaveIndex: waveIndex,
+				Timestamp: c.now().UTC(),
+				Message:   fmt.Sprintf("demo token validation failed: %v", err),
+			})
+			return fmt.Errorf("validate demo token for %s: %w", mission.ID, err)
+		}
+	} else {
+		if err := c.verifier.Verify(ctx, mission, worktreePath); err != nil {
+			_ = c.publish(ctx, Event{
+				Type:      EventMissionHalted,
+				MissionID: mission.ID,
+				WaveIndex: waveIndex,
+				Timestamp: c.now().UTC(),
+				Message:   fmt.Sprintf("verification failed: %v", err),
+			})
+			return fmt.Errorf("verify mission %s: %w", mission.ID, err)
+		}
 	}
 
 	if err := c.publish(ctx, Event{
@@ -318,4 +356,8 @@ func (c *Commander) runMission(ctx context.Context, waveIndex int, mission Missi
 
 func (c *Commander) publish(ctx context.Context, event Event) error {
 	return c.events.Publish(ctx, event)
+}
+
+func isStandardOpsMission(mission Mission) bool {
+	return strings.EqualFold(strings.TrimSpace(mission.Classification), MissionClassificationStandardOps)
 }

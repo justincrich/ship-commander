@@ -122,9 +122,10 @@ func TestCommanderExecuteSingleMissionFlow(t *testing.T) {
 	locks := &fakeSurfaceLocker{sequence: &sequence}
 	harness := &fakeHarness{sequence: &sequence}
 	verifier := &fakeVerifier{}
+	demoTokens := &fakeDemoTokenValidator{}
 	events := &fakeEventPublisher{}
 
-	cmd, err := New(store, worktrees, locks, harness, verifier, events, CommanderConfig{WIPLimit: 2})
+	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 2})
 	if err != nil {
 		t.Fatalf("new commander: %v", err)
 	}
@@ -145,6 +146,9 @@ func TestCommanderExecuteSingleMissionFlow(t *testing.T) {
 	if len(events.events) != 1 || events.events[0].Type != EventMissionCompleted {
 		t.Fatalf("events = %v, want one %s", events.events, EventMissionCompleted)
 	}
+	if demoTokens.CallCount() != 0 {
+		t.Fatalf("demo token calls = %d, want 0 for non-standard ops mission", demoTokens.CallCount())
+	}
 }
 
 func TestCommanderExecutePublishesHaltedOnVerifyFailure(t *testing.T) {
@@ -157,10 +161,11 @@ func TestCommanderExecutePublishesHaltedOnVerifyFailure(t *testing.T) {
 	worktrees := &fakeWorktreeManager{paths: map[string]string{"m1": "/tmp/worktree/m1"}}
 	locks := &fakeSurfaceLocker{}
 	harness := &fakeHarness{}
-	verifier := &fakeVerifier{err: errors.New("verification failed")}
+	verifier := &fakeVerifier{verifyErr: errors.New("verification failed")}
+	demoTokens := &fakeDemoTokenValidator{}
 	events := &fakeEventPublisher{}
 
-	cmd, err := New(store, worktrees, locks, harness, verifier, events, CommanderConfig{WIPLimit: 1})
+	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
 	if err != nil {
 		t.Fatalf("new commander: %v", err)
 	}
@@ -201,9 +206,10 @@ func TestCommanderExecuteEnforcesWIPLimit(t *testing.T) {
 	locks := &fakeSurfaceLocker{}
 	harness := &fakeHarness{delay: 30 * time.Millisecond}
 	verifier := &fakeVerifier{}
+	demoTokens := &fakeDemoTokenValidator{}
 	events := &fakeEventPublisher{}
 
-	cmd, err := New(store, worktrees, locks, harness, verifier, events, CommanderConfig{WIPLimit: 2})
+	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 2})
 	if err != nil {
 		t.Fatalf("new commander: %v", err)
 	}
@@ -243,9 +249,10 @@ func TestCommanderExecuteUsesDependencyOrderAcrossWaves(t *testing.T) {
 	locks := &fakeSurfaceLocker{}
 	harness := &fakeHarness{sequence: &sequence}
 	verifier := &fakeVerifier{}
+	demoTokens := &fakeDemoTokenValidator{}
 	events := &fakeEventPublisher{}
 
-	cmd, err := New(store, worktrees, locks, harness, verifier, events, CommanderConfig{WIPLimit: 2})
+	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 2})
 	if err != nil {
 		t.Fatalf("new commander: %v", err)
 	}
@@ -259,6 +266,100 @@ func TestCommanderExecuteUsesDependencyOrderAcrossWaves(t *testing.T) {
 	}
 	if sequence[0] != "dispatch:m1" || sequence[1] != "dispatch:m2" {
 		t.Fatalf("dispatch sequence = %v, want [dispatch:m1 dispatch:m2]", sequence)
+	}
+}
+
+func TestCommanderExecuteStandardOpsUsesVerifyImplementAndDemoToken(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeManifestStore{
+		manifest: []Mission{{ID: "m1", Title: "Mission One", Classification: MissionClassificationStandardOps}},
+		ready:    [][]string{{"m1"}},
+	}
+	worktrees := &fakeWorktreeManager{paths: map[string]string{"m1": "/tmp/worktree/m1"}}
+	locks := &fakeSurfaceLocker{}
+	harness := &fakeHarness{}
+	verifier := &fakeVerifier{}
+	demoTokens := &fakeDemoTokenValidator{}
+	events := &fakeEventPublisher{}
+
+	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
+	if err != nil {
+		t.Fatalf("new commander: %v", err)
+	}
+
+	if err := cmd.Execute(context.Background(), "commission-1"); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if verifier.VerifyCallCount() != 0 {
+		t.Fatalf("verify calls = %d, want 0", verifier.VerifyCallCount())
+	}
+	if verifier.VerifyImplementCallCount() != 1 {
+		t.Fatalf("verify implement calls = %d, want 1", verifier.VerifyImplementCallCount())
+	}
+	if demoTokens.CallCount() != 1 {
+		t.Fatalf("demo token calls = %d, want 1", demoTokens.CallCount())
+	}
+}
+
+func TestCommanderExecuteStandardOpsHaltsOnVerifyImplementFailure(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeManifestStore{
+		manifest: []Mission{{ID: "m1", Title: "Mission One", Classification: MissionClassificationStandardOps}},
+		ready:    [][]string{{"m1"}},
+	}
+	worktrees := &fakeWorktreeManager{paths: map[string]string{"m1": "/tmp/worktree/m1"}}
+	locks := &fakeSurfaceLocker{}
+	harness := &fakeHarness{}
+	verifier := &fakeVerifier{verifyImplementErr: errors.New("verify implement failed")}
+	demoTokens := &fakeDemoTokenValidator{}
+	events := &fakeEventPublisher{}
+
+	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
+	if err != nil {
+		t.Fatalf("new commander: %v", err)
+	}
+
+	if err := cmd.Execute(context.Background(), "commission-1"); err == nil {
+		t.Fatal("expected execute error, got nil")
+	}
+	if demoTokens.CallCount() != 0 {
+		t.Fatalf("demo token calls = %d, want 0 when verify implement fails", demoTokens.CallCount())
+	}
+	if len(events.events) == 0 || events.events[0].Type != EventMissionHalted {
+		t.Fatalf("events = %v, want first event %s", events.events, EventMissionHalted)
+	}
+}
+
+func TestCommanderExecuteStandardOpsHaltsOnDemoTokenFailure(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeManifestStore{
+		manifest: []Mission{{ID: "m1", Title: "Mission One", Classification: MissionClassificationStandardOps}},
+		ready:    [][]string{{"m1"}},
+	}
+	worktrees := &fakeWorktreeManager{paths: map[string]string{"m1": "/tmp/worktree/m1"}}
+	locks := &fakeSurfaceLocker{}
+	harness := &fakeHarness{}
+	verifier := &fakeVerifier{}
+	demoTokens := &fakeDemoTokenValidator{err: errors.New("demo token invalid")}
+	events := &fakeEventPublisher{}
+
+	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
+	if err != nil {
+		t.Fatalf("new commander: %v", err)
+	}
+
+	if err := cmd.Execute(context.Background(), "commission-1"); err == nil {
+		t.Fatal("expected execute error, got nil")
+	}
+	if verifier.VerifyImplementCallCount() != 1 {
+		t.Fatalf("verify implement calls = %d, want 1", verifier.VerifyImplementCallCount())
+	}
+	if len(events.events) == 0 || events.events[0].Type != EventMissionHalted {
+		t.Fatalf("events = %v, want first event %s", events.events, EventMissionHalted)
 	}
 }
 
@@ -354,11 +455,62 @@ func (f *fakeHarness) DispatchImplementer(_ context.Context, req DispatchRequest
 }
 
 type fakeVerifier struct {
-	err error
+	verifyErr            error
+	verifyImplementErr   error
+	verifyCalls          int
+	verifyImplementCalls int
+	mu                   sync.Mutex
 }
 
 func (f *fakeVerifier) Verify(_ context.Context, _ Mission, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.verifyCalls++
+	return f.verifyErr
+}
+
+func (f *fakeVerifier) VerifyImplement(_ context.Context, _ Mission, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.verifyImplementCalls++
+	return f.verifyImplementErr
+}
+
+func (f *fakeVerifier) VerifyCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.verifyCalls
+}
+
+func (f *fakeVerifier) VerifyImplementCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.verifyImplementCalls
+}
+
+type fakeDemoTokenValidator struct {
+	err   error
+	calls int
+	mu    sync.Mutex
+}
+
+func (f *fakeDemoTokenValidator) Validate(_ context.Context, _ Mission, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.calls++
 	return f.err
+}
+
+func (f *fakeDemoTokenValidator) CallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.calls
 }
 
 type fakeEventPublisher struct {
