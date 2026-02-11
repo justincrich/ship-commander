@@ -55,7 +55,7 @@ func TestRootCommandHelpListsExpectedSubcommands(t *testing.T) {
 	}
 
 	output := stdout.String()
-	expected := []string{"init", "plan", "execute", "tui", "status"}
+	expected := []string{"init", "plan", "execute", "tui", "status", "bugreport"}
 	for _, name := range expected {
 		if !strings.Contains(output, name) {
 			t.Fatalf("help output missing %q: %s", name, output)

@@ -164,6 +164,7 @@ func newRootCommand(ctx context.Context, cfg *config.Config, logger *log.Logger)
 		newLeafCommand("execute", "Execute approved missions", logger),
 		newLeafCommand("tui", "Launch terminal dashboard", logger),
 		newLeafCommand("status", "Show commission and mission status", logger),
+		newBugreportCommand(logger),
 	)
 
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
@@ -289,6 +290,7 @@ func isSensitiveToken(value string) bool {
 		"passwd",
 		"secret",
 		"api-key",
+		"api_key",
 		"apikey",
 		"auth",
 		"bearer",
