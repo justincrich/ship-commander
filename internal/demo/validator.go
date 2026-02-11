@@ -2,12 +2,14 @@ package demo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/ship-commander/sc3/internal/state"
 	"gopkg.in/yaml.v3"
 )
 
@@ -192,21 +194,38 @@ func validateEvidenceRequirements(
 	hasTests := hasSectionContent(sections, "tests")
 	hasManualSteps := hasSectionContent(sections, "manual_steps")
 
-	switch classification {
-	case ClassificationREDAlert:
-		if !hasTests {
-			return failResult(tokenPath, "RED_ALERT requires a tests section")
-		}
-		if !hasCommands && !hasDiffRefs {
-			return failResult(tokenPath, "RED_ALERT requires commands or diff_refs in addition to tests")
-		}
-	case ClassificationStandardOps:
-		if !hasCommands && !hasManualSteps && !hasDiffRefs {
-			return failResult(tokenPath, "STANDARD_OPS requires commands, manual_steps, or diff_refs")
-		}
+	err := state.ValidateClassificationProof(
+		state.ClassifiedMission{
+			ID:             "mission",
+			Classification: classification,
+		},
+		state.DemoTokenProof{
+			Tests:       boolToEvidenceSlice(hasTests),
+			Commands:    boolToEvidenceSlice(hasCommands),
+			ManualSteps: boolToEvidenceSlice(hasManualSteps),
+			DiffRefs:    boolToEvidenceSlice(hasDiffRefs),
+		},
+	)
+	if err != nil {
+		return failResult(tokenPath, extractValidationReason(err))
 	}
 
 	return ValidationResult{Valid: true, TokenPath: tokenPath}
+}
+
+func boolToEvidenceSlice(ok bool) []string {
+	if !ok {
+		return nil
+	}
+	return []string{"present"}
+}
+
+func extractValidationReason(err error) string {
+	var proofErr *state.ClassificationProofError
+	if !errors.As(err, &proofErr) {
+		return err.Error()
+	}
+	return proofErr.Reason
 }
 
 func splitFrontmatter(markdown string) (string, string, bool) {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ship-commander/sc3/internal/admiral"
+	"github.com/ship-commander/sc3/internal/commander"
 	"github.com/ship-commander/sc3/internal/commission"
 	"github.com/ship-commander/sc3/internal/events"
 )
@@ -474,6 +475,181 @@ func TestPlanBroadcastsAdmiralAnswerWhenRequested(t *testing.T) {
 	}
 }
 
+func TestPlanClassifiesCommanderMissions(t *testing.T) {
+	t.Parallel()
+
+	factory := &fakeFactory{
+		scripts: map[AgentRole]map[int]SessionOutput{
+			RoleCaptain: {
+				1: {
+					Missions: []MissionContribution{{
+						MissionID:  "M-1",
+						Title:      "Add mission classifier",
+						UseCaseIDs: []string{"UC-1", "UC-2"},
+						SignOff:    true,
+					}},
+				},
+			},
+			RoleCommander: {
+				1: {
+					Missions: []MissionContribution{{
+						MissionID:              "M-1",
+						Title:                  "Add mission classifier",
+						UseCaseIDs:             []string{"UC-1", "UC-2"},
+						SignOff:                true,
+						UseCaseContext:         "UC-COMM-05",
+						FunctionalRequirements: "Classify mission risk",
+						DesignRequirements:     "Display risk badge",
+						Harness:                "codex",
+						Model:                  "gpt-5",
+					}},
+				},
+			},
+			RoleDesignOfficer: {
+				1: {
+					Missions: []MissionContribution{{
+						MissionID:  "M-1",
+						Title:      "Add mission classifier",
+						UseCaseIDs: []string{"UC-1", "UC-2"},
+						SignOff:    true,
+					}},
+				},
+			},
+		},
+	}
+
+	room := newReadyRoomForTest(t, factory, 1)
+	if err := room.SetMissionClassifier(&fakeMissionClassifier{
+		result: commander.ClassificationResult{
+			MissionID:      "M-1",
+			Title:          "Add mission classifier",
+			Classification: commander.MissionClassificationREDAlert,
+			Rationale: commander.ClassificationRationale{
+				AffectsBehavior: true,
+				CriteriaMatched: []string{"business_logic"},
+				RiskAssessment:  "Touches execution behavior.",
+				Confidence:      "high",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("set mission classifier: %v", err)
+	}
+
+	result, err := room.Plan(context.Background())
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if !result.Consensus {
+		t.Fatal("consensus = false, want true")
+	}
+	if len(result.Missions) != 1 {
+		t.Fatalf("missions len = %d, want 1", len(result.Missions))
+	}
+
+	mission := result.Missions[0]
+	if mission.Classification != commander.MissionClassificationREDAlert {
+		t.Fatalf("classification = %q, want %q", mission.Classification, commander.MissionClassificationREDAlert)
+	}
+	if mission.ClassificationConfidence != "high" {
+		t.Fatalf("confidence = %q, want high", mission.ClassificationConfidence)
+	}
+	if mission.ClassificationNeedsReview {
+		t.Fatal("classification should not require review")
+	}
+}
+
+func TestPlanLowConfidenceClassificationTriggersAdmiralReview(t *testing.T) {
+	t.Parallel()
+
+	factory := &fakeFactory{
+		scripts: map[AgentRole]map[int]SessionOutput{
+			RoleCaptain: {
+				1: {
+					Missions: []MissionContribution{{MissionID: "M-2", UseCaseIDs: []string{"UC-1", "UC-2"}, SignOff: true}},
+				},
+			},
+			RoleCommander: {
+				1: {
+					Missions: []MissionContribution{{
+						MissionID:              "M-2",
+						Title:                  "Tune mission styling",
+						UseCaseIDs:             []string{"UC-1", "UC-2"},
+						SignOff:                true,
+						FunctionalRequirements: "Adjust mission dashboard styling",
+						Harness:                "codex",
+						Model:                  "gpt-5",
+					}},
+				},
+			},
+			RoleDesignOfficer: {
+				1: {
+					Missions: []MissionContribution{{MissionID: "M-2", UseCaseIDs: []string{"UC-1", "UC-2"}, SignOff: true}},
+				},
+			},
+		},
+	}
+
+	room := newReadyRoomForTest(t, factory, 1)
+	classificationResult := commander.ClassificationResult{
+		MissionID:      "M-2",
+		Title:          "Tune mission styling",
+		Classification: commander.MissionClassificationREDAlert,
+		Rationale: commander.ClassificationRationale{
+			AffectsBehavior: false,
+			CriteriaMatched: []string{"tooling"},
+			RiskAssessment:  "Ambiguous mission framing.",
+			Confidence:      "low",
+		},
+	}
+	if err := room.SetMissionClassifier(&fakeMissionClassifier{
+		result: classificationResult,
+		err:    &commander.LowConfidenceClassificationError{Result: classificationResult},
+	}); err != nil {
+		t.Fatalf("set mission classifier: %v", err)
+	}
+
+	answerDone := make(chan struct{})
+	answerErrCh := make(chan error, 1)
+	go func() {
+		defer close(answerDone)
+		question := <-room.QuestionGate().Questions()
+		answerErrCh <- room.QuestionGate().SubmitAnswer(admiral.AdmiralAnswer{
+			QuestionID:     question.QuestionID,
+			SelectedOption: "Reclassify as STANDARD_OPS",
+		})
+	}()
+
+	result, err := room.Plan(context.Background())
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	<-answerDone
+	if answerErr := <-answerErrCh; answerErr != nil {
+		t.Fatalf("submit answer: %v", answerErr)
+	}
+
+	if len(result.Missions) != 1 {
+		t.Fatalf("missions len = %d, want 1", len(result.Missions))
+	}
+	mission := result.Missions[0]
+	if mission.Classification != commander.MissionClassificationStandardOps {
+		t.Fatalf(
+			"classification = %q, want %q",
+			mission.Classification,
+			commander.MissionClassificationStandardOps,
+		)
+	}
+	if !mission.ClassificationNeedsReview {
+		t.Fatal("expected classification review flag")
+	}
+	if mission.ClassificationReviewSource != "admiral_reclassified" {
+		t.Fatalf("review source = %q, want admiral_reclassified", mission.ClassificationReviewSource)
+	}
+	if len(result.QuestionLog) != 1 {
+		t.Fatalf("question log entries = %d, want 1", len(result.QuestionLog))
+	}
+}
+
 func TestNewValidatesInputs(t *testing.T) {
 	t.Parallel()
 
@@ -548,6 +724,21 @@ type fakeFactory struct {
 	spawnRequests  []SpawnRequest
 	sessionsByRole map[AgentRole]*fakeSession
 	spawnErr       error
+}
+
+type fakeMissionClassifier struct {
+	result commander.ClassificationResult
+	err    error
+}
+
+func (f *fakeMissionClassifier) ClassifyMission(
+	_ context.Context,
+	_ commander.ClassificationContext,
+) (commander.ClassificationResult, error) {
+	if f.err != nil {
+		return commander.ClassificationResult{}, f.err
+	}
+	return f.result, nil
 }
 
 func (f *fakeFactory) Spawn(_ context.Context, request SpawnRequest) (Session, error) {

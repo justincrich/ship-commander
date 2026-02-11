@@ -27,9 +27,15 @@ const (
 //
 //nolint:revive // Field names match issue contract.
 type PlanMission struct {
-	ID         string   `json:"id"`
-	Title      string   `json:"title,omitempty"`
-	UseCaseIDs []string `json:"useCaseIds,omitempty"`
+	ID                         string   `json:"id"`
+	Title                      string   `json:"title,omitempty"`
+	UseCaseIDs                 []string `json:"useCaseIds,omitempty"`
+	Classification             string   `json:"classification,omitempty"`
+	ClassificationRationale    string   `json:"classificationRationale,omitempty"`
+	ClassificationCriteria     []string `json:"classificationCriteria,omitempty"`
+	ClassificationConfidence   string   `json:"classificationConfidence,omitempty"`
+	ClassificationNeedsReview  bool     `json:"classificationNeedsReview,omitempty"`
+	ClassificationReviewSource string   `json:"classificationReviewSource,omitempty"`
 }
 
 // PlanMessage captures a persisted Ready Room message.

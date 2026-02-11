@@ -48,14 +48,19 @@ const (
 
 // Mission is an executable mission in an approved manifest.
 type Mission struct {
-	ID             string
-	Title          string
-	Classification string
-	DependsOn      []string
-	UseCaseIDs     []string
-	SurfaceArea    []string
-	RevisionCount  int
-	MaxRevisions   int
+	ID                         string
+	Title                      string
+	Classification             string
+	ClassificationRationale    string
+	ClassificationCriteria     []string
+	ClassificationConfidence   string
+	ClassificationNeedsReview  bool
+	ClassificationReviewSource string
+	DependsOn                  []string
+	UseCaseIDs                 []string
+	SurfaceArea                []string
+	RevisionCount              int
+	MaxRevisions               int
 	// ACAttemptsExhausted indicates all AC attempts failed and mission must halt deterministically.
 	ACAttemptsExhausted bool
 	// ManualHalt requests deterministic dispatch stop before running mission work.
@@ -506,10 +511,15 @@ func buildApprovalRequest(
 	coverage := make(map[string]admiral.CoverageStatus)
 	for _, mission := range manifest {
 		requestMissions = append(requestMissions, admiral.Mission{
-			ID:         mission.ID,
-			Title:      mission.Title,
-			DependsOn:  append([]string(nil), mission.DependsOn...),
-			UseCaseIDs: append([]string(nil), mission.UseCaseIDs...),
+			ID:                        mission.ID,
+			Title:                     mission.Title,
+			DependsOn:                 append([]string(nil), mission.DependsOn...),
+			UseCaseIDs:                append([]string(nil), mission.UseCaseIDs...),
+			Classification:            mission.Classification,
+			ClassificationRationale:   mission.ClassificationRationale,
+			ClassificationCriteria:    append([]string(nil), mission.ClassificationCriteria...),
+			ClassificationConfidence:  mission.ClassificationConfidence,
+			ClassificationNeedsReview: mission.ClassificationNeedsReview,
 		})
 		for _, useCaseID := range mission.UseCaseIDs {
 			useCaseID = strings.TrimSpace(useCaseID)

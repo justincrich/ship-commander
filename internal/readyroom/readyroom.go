@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ship-commander/sc3/internal/admiral"
+	"github.com/ship-commander/sc3/internal/commander"
 	"github.com/ship-commander/sc3/internal/commission"
 	"github.com/ship-commander/sc3/internal/events"
 )
@@ -65,16 +66,31 @@ type MissionSignoffs struct {
 
 // MissionPlan is one planned mission candidate produced by Ready Room sessions.
 type MissionPlan struct {
-	ID         string
-	UseCaseIDs []string
-	Signoffs   MissionSignoffs
+	ID                         string
+	Title                      string
+	UseCaseIDs                 []string
+	Signoffs                   MissionSignoffs
+	Classification             string
+	ClassificationRationale    string
+	ClassificationCriteria     []string
+	ClassificationConfidence   string
+	ClassificationNeedsReview  bool
+	ClassificationReviewSource string
 }
 
 // MissionContribution captures a single session's mission-level output for one iteration.
 type MissionContribution struct {
-	MissionID  string
-	UseCaseIDs []string
-	SignOff    bool
+	MissionID              string
+	Title                  string
+	UseCaseIDs             []string
+	SignOff                bool
+	UseCaseContext         string
+	FunctionalRequirements string
+	DesignRequirements     string
+	Domain                 string
+	Dependencies           []string
+	Harness                string
+	Model                  string
 }
 
 // SessionInput is the isolated context each session receives on each loop iteration.
@@ -109,6 +125,11 @@ type Session interface {
 	Close(ctx context.Context) error
 }
 
+// MissionClassifier applies the commander's RED_ALERT/STANDARD_OPS decision model per mission.
+type MissionClassifier interface {
+	ClassifyMission(ctx context.Context, input commander.ClassificationContext) (commander.ClassificationResult, error)
+}
+
 // PlanResult is the deterministic Ready Room output snapshot.
 type PlanResult struct {
 	Missions    []MissionPlan
@@ -125,6 +146,7 @@ type ReadyRoom struct {
 	commission    commission.Commission
 	maxIterations int
 	now           func() time.Time
+	classifier    MissionClassifier
 
 	sessions     map[AgentRole]Session
 	mailboxes    map[AgentRole][]ReadyRoomMessage
@@ -180,6 +202,18 @@ func (r *ReadyRoom) SetEventBus(bus events.Bus) error {
 	return nil
 }
 
+// SetMissionClassifier configures mission classification during Commander contribution merge.
+func (r *ReadyRoom) SetMissionClassifier(classifier MissionClassifier) error {
+	if r == nil {
+		return errors.New("ready room is nil")
+	}
+	if classifier == nil {
+		return errors.New("mission classifier is required")
+	}
+	r.classifier = classifier
+	return nil
+}
+
 // Plan executes the deterministic planning loop until consensus or max iterations.
 func (r *ReadyRoom) Plan(ctx context.Context) (result PlanResult, err error) {
 	if r == nil {
@@ -223,7 +257,9 @@ func (r *ReadyRoom) Plan(ctx context.Context) (result PlanResult, err error) {
 			if err := r.handleQuestions(ctx, role, output.Questions); err != nil {
 				return PlanResult{}, err
 			}
-			r.mergeMissionContributions(role, output.Missions)
+			if err := r.mergeMissionContributions(ctx, role, output.Missions); err != nil {
+				return PlanResult{}, err
+			}
 			if err := r.routeMessages(role, output.Messages); err != nil {
 				return PlanResult{}, err
 			}
@@ -314,7 +350,11 @@ func (r *ReadyRoom) closeSessions(ctx context.Context) error {
 	return nil
 }
 
-func (r *ReadyRoom) mergeMissionContributions(role AgentRole, contributions []MissionContribution) {
+func (r *ReadyRoom) mergeMissionContributions(
+	ctx context.Context,
+	role AgentRole,
+	contributions []MissionContribution,
+) error {
 	for _, contribution := range contributions {
 		missionID := strings.TrimSpace(contribution.MissionID)
 		if missionID == "" {
@@ -329,6 +369,12 @@ func (r *ReadyRoom) mergeMissionContributions(role AgentRole, contributions []Mi
 			}
 			r.missionPlan[missionID] = mission
 		}
+		if title := strings.TrimSpace(contribution.Title); title != "" {
+			mission.Title = title
+		}
+		if mission.Title == "" {
+			mission.Title = mission.ID
+		}
 
 		for _, useCaseID := range contribution.UseCaseIDs {
 			useCaseID = strings.TrimSpace(useCaseID)
@@ -336,6 +382,10 @@ func (r *ReadyRoom) mergeMissionContributions(role AgentRole, contributions []Mi
 				continue
 			}
 			mission.UseCaseIDs = append(mission.UseCaseIDs, useCaseID)
+		}
+
+		if err := r.applyCommanderClassification(ctx, role, mission, contribution); err != nil {
+			return err
 		}
 
 		if !contribution.SignOff {
@@ -351,6 +401,111 @@ func (r *ReadyRoom) mergeMissionContributions(role AgentRole, contributions []Mi
 			mission.Signoffs.DesignOfficer = true
 		}
 	}
+
+	return nil
+}
+
+func (r *ReadyRoom) applyCommanderClassification(
+	ctx context.Context,
+	role AgentRole,
+	mission *MissionPlan,
+	contribution MissionContribution,
+) error {
+	if role != RoleCommander || r.classifier == nil || mission == nil {
+		return nil
+	}
+
+	input := commander.ClassificationContext{
+		MissionID:              mission.ID,
+		Title:                  firstNonEmpty(strings.TrimSpace(contribution.Title), strings.TrimSpace(mission.Title), strings.TrimSpace(mission.ID)),
+		UseCase:                strings.TrimSpace(contribution.UseCaseContext),
+		FunctionalRequirements: strings.TrimSpace(contribution.FunctionalRequirements),
+		DesignRequirements:     strings.TrimSpace(contribution.DesignRequirements),
+		CommissionTitle:        strings.TrimSpace(r.commission.Title),
+		Domain:                 strings.TrimSpace(contribution.Domain),
+		Dependencies:           append([]string(nil), contribution.Dependencies...),
+		Harness:                strings.TrimSpace(contribution.Harness),
+		Model:                  strings.TrimSpace(contribution.Model),
+	}
+
+	result, err := r.classifier.ClassifyMission(ctx, input)
+	requiresReview := false
+	if err != nil {
+		var lowConfidenceErr *commander.LowConfidenceClassificationError
+		if !errors.As(err, &lowConfidenceErr) {
+			return fmt.Errorf("classify mission %s: %w", mission.ID, err)
+		}
+		result = lowConfidenceErr.Result
+		requiresReview = true
+	}
+
+	mission.Classification = result.Classification
+	mission.ClassificationCriteria = append([]string(nil), result.Rationale.CriteriaMatched...)
+	mission.ClassificationRationale = result.Rationale.RiskAssessment
+	mission.ClassificationConfidence = result.Rationale.Confidence
+	mission.ClassificationNeedsReview = requiresReview || result.RequiresAdmiralReview()
+
+	if !mission.ClassificationNeedsReview {
+		mission.ClassificationReviewSource = ""
+		return nil
+	}
+	return r.resolveLowConfidenceClassification(ctx, mission)
+}
+
+func (r *ReadyRoom) resolveLowConfidenceClassification(ctx context.Context, mission *MissionPlan) error {
+	question := admiral.AdmiralQuestion{
+		QuestionID: fmt.Sprintf(
+			"classification-%s-%d",
+			strings.ReplaceAll(strings.ToLower(strings.TrimSpace(mission.ID)), " ", "-"),
+			len(r.messages)+1,
+		),
+		AskingAgent:    string(RoleCommander),
+		MissionID:      mission.ID,
+		Domain:         "technical",
+		QuestionText:   fmt.Sprintf("Confirm classification for %s: %s", mission.ID, mission.Classification),
+		Options:        []string{"Confirm", "Reclassify as RED_ALERT", "Reclassify as STANDARD_OPS"},
+		AllowFreeText:  true,
+		AllowBroadcast: false,
+	}
+
+	answer, err := r.askQuestion(ctx, RoleCommander, question)
+	if err != nil {
+		return err
+	}
+
+	switch normalizeAdmiralClassificationSelection(answer.SelectedOption) {
+	case commander.MissionClassificationREDAlert:
+		mission.Classification = commander.MissionClassificationREDAlert
+		mission.ClassificationReviewSource = "admiral_reclassified"
+	case commander.MissionClassificationStandardOps:
+		mission.Classification = commander.MissionClassificationStandardOps
+		mission.ClassificationReviewSource = "admiral_reclassified"
+	default:
+		mission.ClassificationReviewSource = "admiral_confirmed"
+	}
+
+	return nil
+}
+
+func normalizeAdmiralClassificationSelection(option string) string {
+	option = strings.ToUpper(strings.TrimSpace(option))
+	switch {
+	case strings.Contains(option, commander.MissionClassificationREDAlert):
+		return commander.MissionClassificationREDAlert
+	case strings.Contains(option, commander.MissionClassificationStandardOps):
+		return commander.MissionClassificationStandardOps
+	default:
+		return ""
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func (r *ReadyRoom) routeMessages(from AgentRole, messages []ReadyRoomMessage) error {
@@ -405,29 +560,50 @@ func (r *ReadyRoom) handleQuestions(
 	}
 
 	for _, question := range questions {
-		question.AskingAgent = string(role)
-
-		if r.eventBus != nil {
-			r.eventBus.Publish(events.Event{
-				Type:       events.EventTypeAdmiralQuestion,
-				EntityType: "planning_question",
-				EntityID:   strings.TrimSpace(question.QuestionID),
-				Payload:    question,
-				Severity:   events.SeverityInfo,
-			})
+		if _, err := r.askQuestion(ctx, role, question); err != nil {
+			return err
 		}
-
-		answer, err := r.questionGate.Ask(ctx, question)
-		if err != nil {
-			return fmt.Errorf("question gate ask role=%s question_id=%s: %w", role, question.QuestionID, err)
-		}
-		if err := admiral.ValidateAnswer(question, answer); err != nil {
-			return fmt.Errorf("invalid admiral answer role=%s question_id=%s: %w", role, question.QuestionID, err)
-		}
-		r.routeAdmiralAnswer(role, question, answer)
 	}
 
 	return nil
+}
+
+func (r *ReadyRoom) askQuestion(
+	ctx context.Context,
+	role AgentRole,
+	question admiral.AdmiralQuestion,
+) (admiral.AdmiralAnswer, error) {
+	question.AskingAgent = string(role)
+
+	if r.eventBus != nil {
+		r.eventBus.Publish(events.Event{
+			Type:       events.EventTypeAdmiralQuestion,
+			EntityType: "planning_question",
+			EntityID:   strings.TrimSpace(question.QuestionID),
+			Payload:    question,
+			Severity:   events.SeverityInfo,
+		})
+	}
+
+	answer, err := r.questionGate.Ask(ctx, question)
+	if err != nil {
+		return admiral.AdmiralAnswer{}, fmt.Errorf(
+			"question gate ask role=%s question_id=%s: %w",
+			role,
+			question.QuestionID,
+			err,
+		)
+	}
+	if err := admiral.ValidateAnswer(question, answer); err != nil {
+		return admiral.AdmiralAnswer{}, fmt.Errorf(
+			"invalid admiral answer role=%s question_id=%s: %w",
+			role,
+			question.QuestionID,
+			err,
+		)
+	}
+	r.routeAdmiralAnswer(role, question, answer)
+	return answer, nil
 }
 
 func (r *ReadyRoom) routeAdmiralAnswer(
@@ -486,9 +662,16 @@ func (r *ReadyRoom) buildResult(iterations int, coverage map[string]CoverageStat
 	missions := make([]MissionPlan, 0, len(r.missionPlan))
 	for _, mission := range r.missionPlan {
 		missions = append(missions, MissionPlan{
-			ID:         mission.ID,
-			UseCaseIDs: append([]string(nil), mission.UseCaseIDs...),
-			Signoffs:   mission.Signoffs,
+			ID:                         mission.ID,
+			Title:                      mission.Title,
+			UseCaseIDs:                 append([]string(nil), mission.UseCaseIDs...),
+			Signoffs:                   mission.Signoffs,
+			Classification:             mission.Classification,
+			ClassificationRationale:    mission.ClassificationRationale,
+			ClassificationCriteria:     append([]string(nil), mission.ClassificationCriteria...),
+			ClassificationConfidence:   mission.ClassificationConfidence,
+			ClassificationNeedsReview:  mission.ClassificationNeedsReview,
+			ClassificationReviewSource: mission.ClassificationReviewSource,
 		})
 	}
 	slices.SortFunc(missions, func(a, b MissionPlan) int {

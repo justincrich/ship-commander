@@ -160,9 +160,14 @@ func TestCommanderExecuteRequiresApprovalBeforeDispatch(t *testing.T) {
 	store := &fakeManifestStore{
 		manifest: []Mission{
 			{
-				ID:         "m1",
-				Title:      "Mission One",
-				UseCaseIDs: []string{"UC-1"},
+				ID:                        "m1",
+				Title:                     "Mission One",
+				UseCaseIDs:                []string{"UC-1"},
+				Classification:            MissionClassificationREDAlert,
+				ClassificationRationale:   "Touches execution behavior",
+				ClassificationCriteria:    []string{"business_logic"},
+				ClassificationConfidence:  "high",
+				ClassificationNeedsReview: false,
 			},
 		},
 		ready: [][]string{{"m1"}},
@@ -205,6 +210,16 @@ func TestCommanderExecuteRequiresApprovalBeforeDispatch(t *testing.T) {
 	}
 	if len(approval.lastRequest.MissionManifest) != 1 || approval.lastRequest.MissionManifest[0].ID != "m1" {
 		t.Fatalf("approval mission manifest = %+v, want mission m1", approval.lastRequest.MissionManifest)
+	}
+	if approval.lastRequest.MissionManifest[0].Classification != MissionClassificationREDAlert {
+		t.Fatalf(
+			"approval mission classification = %q, want %q",
+			approval.lastRequest.MissionManifest[0].Classification,
+			MissionClassificationREDAlert,
+		)
+	}
+	if approval.lastRequest.MissionManifest[0].ClassificationRationale == "" {
+		t.Fatal("approval mission rationale should not be empty")
 	}
 	if len(approval.lastRequest.WaveAssignments) != 1 || approval.lastRequest.WaveAssignments[0].Index != 1 {
 		t.Fatalf("approval wave assignments = %+v, want one wave", approval.lastRequest.WaveAssignments)

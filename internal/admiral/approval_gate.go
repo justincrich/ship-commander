@@ -27,10 +27,15 @@ const (
 //
 //nolint:revive // Field names follow the issue contract.
 type Mission struct {
-	ID         string
-	Title      string
-	DependsOn  []string
-	UseCaseIDs []string
+	ID                        string
+	Title                     string
+	DependsOn                 []string
+	UseCaseIDs                []string
+	Classification            string
+	ClassificationRationale   string
+	ClassificationCriteria    []string
+	ClassificationConfidence  string
+	ClassificationNeedsReview bool
 }
 
 // Wave is one deterministic execution wave assignment for approval review.
@@ -218,6 +223,10 @@ func normalizeApprovalMissions(missions []Mission) []Mission {
 		mission.Title = strings.TrimSpace(mission.Title)
 		mission.DependsOn = normalizeStringSlice(mission.DependsOn)
 		mission.UseCaseIDs = normalizeStringSlice(mission.UseCaseIDs)
+		mission.Classification = strings.ToUpper(strings.TrimSpace(mission.Classification))
+		mission.ClassificationRationale = strings.TrimSpace(mission.ClassificationRationale)
+		mission.ClassificationCriteria = normalizeStringSlice(mission.ClassificationCriteria)
+		mission.ClassificationConfidence = strings.ToLower(strings.TrimSpace(mission.ClassificationConfidence))
 		normalized = append(normalized, mission)
 	}
 	return normalized
