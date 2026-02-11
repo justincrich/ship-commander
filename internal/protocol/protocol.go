@@ -35,7 +35,7 @@ const (
 )
 
 const (
-	defaultWaitTimeout = 5 * time.Minute
+	defaultWaitTimeout  = 5 * time.Minute
 	defaultPollInterval = 200 * time.Millisecond
 )
 
