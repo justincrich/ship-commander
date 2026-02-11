@@ -15,6 +15,15 @@ type Dependency struct {
 	DependencyType string `json:"dependency_type,omitempty"`
 }
 
+// Comment represents one issue comment entry from `bd show --json`.
+type Comment struct {
+	ID        int    `json:"id"`
+	IssueID   string `json:"issue_id"`
+	Author    string `json:"author"`
+	Text      string `json:"text"`
+	CreatedAt string `json:"created_at"`
+}
+
 // Bead matches the common fields from `bd --json` issue responses.
 type Bead struct {
 	ID           string       `json:"id"`
@@ -28,6 +37,7 @@ type Bead struct {
 	CreatedBy    string       `json:"created_by"`
 	UpdatedAt    string       `json:"updated_at"`
 	Dependencies []Dependency `json:"dependencies,omitempty"`
+	Comments     []Comment    `json:"comments,omitempty"`
 	Parent       string       `json:"parent,omitempty"`
 }
 
