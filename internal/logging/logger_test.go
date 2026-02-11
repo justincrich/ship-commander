@@ -1,12 +1,17 @@
 package logging
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/charmbracelet/log"
 )
 
 func TestNewCreatesJSONLogInHomeDirectory(t *testing.T) {
@@ -103,6 +108,106 @@ func TestWithCorrelationHelpersUpdateSubsequentRecords(t *testing.T) {
 	}
 	if got := asString(record["span_id"]); got != "span-uvw" {
 		t.Fatalf("span_id = %q, want %q", got, "span-uvw")
+	}
+}
+
+func TestNewPrunesOldLogsByRetentionLimit(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	logDir := filepath.Join(home, ".sc3", "logs")
+	if err := os.MkdirAll(logDir, 0o750); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+
+	base := time.Now().Add(-10 * time.Minute)
+	for i := 0; i < 6; i++ {
+		path := filepath.Join(logDir, fmt.Sprintf("sc3-old-%d.log", i))
+		if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+		mod := base.Add(time.Duration(i) * time.Minute)
+		if err := os.Chtimes(path, mod, mod); err != nil {
+			t.Fatalf("chtimes %s: %v", path, err)
+		}
+	}
+
+	logger, err := New(context.Background(), WithMaxFiles(3))
+	if err != nil {
+		t.Fatalf("new logger: %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := logger.Close(); closeErr != nil {
+			t.Fatalf("close logger: %v", closeErr)
+		}
+	})
+
+	files, err := filepath.Glob(filepath.Join(logDir, "sc3-*"))
+	if err != nil {
+		t.Fatalf("glob logs: %v", err)
+	}
+	if len(files) != 3 {
+		t.Fatalf("log file count = %d, want 3 retained files", len(files))
+	}
+	if _, err := os.Stat(filepath.Join(logDir, "sc3-old-0.log")); err == nil {
+		t.Fatal("expected oldest historical log to be pruned")
+	}
+}
+
+func TestNewRotatesWhenMaxSizeExceeded(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	logger, err := New(context.Background(), WithMaxSizeBytes(300), WithMaxFiles(3))
+	if err != nil {
+		t.Fatalf("new logger: %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := logger.Close(); closeErr != nil {
+			t.Fatalf("close logger: %v", closeErr)
+		}
+	})
+
+	payload := strings.Repeat("x", 220)
+	for i := 0; i < 12; i++ {
+		logger.Logger.Info("rotation-entry", "payload", payload)
+	}
+
+	if _, err := os.Stat(logger.Path() + ".1"); err != nil {
+		t.Fatalf("expected rotated backup file: %v", err)
+	}
+	files, err := filepath.Glob(logger.Path() + "*")
+	if err != nil {
+		t.Fatalf("glob rotated files: %v", err)
+	}
+	if len(files) > 3 {
+		t.Fatalf("rotated file count = %d, want <= 3", len(files))
+	}
+}
+
+func TestNewConsoleDebugWritesToStderr(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	var console bytes.Buffer
+
+	logger, err := New(
+		context.Background(),
+		WithConsoleStderr(true),
+		WithConsoleWriter(&console),
+		WithLevel(log.DebugLevel),
+	)
+	if err != nil {
+		t.Fatalf("new logger: %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := logger.Close(); closeErr != nil {
+			t.Fatalf("close logger: %v", closeErr)
+		}
+	})
+
+	logger.Logger.Debug("console-debug-entry")
+	if !strings.Contains(console.String(), "console-debug-entry") {
+		t.Fatalf("expected debug log in stderr mirror, got: %q", console.String())
 	}
 }
 

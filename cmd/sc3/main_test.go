@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -88,6 +89,28 @@ func TestResolveCommandName(t *testing.T) {
 	}
 }
 
+func TestHasDebugFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "long flag", args: []string{"--debug", "plan"}, want: true},
+		{name: "short flag", args: []string{"-d", "plan"}, want: true},
+		{name: "explicit false", args: []string{"--debug=false", "plan"}, want: false},
+		{name: "unset", args: []string{"plan"}, want: false},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hasDebugFlag(tc.args); got != tc.want {
+				t.Fatalf("hasDebugFlag(%v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRedactArgs(t *testing.T) {
 	input := []string{
 		"execute",
@@ -120,7 +143,7 @@ func TestRunInitializesTelemetryBeforeConfigLoad(t *testing.T) {
 	}
 	loadConfigFn = func(context.Context) (*config.Config, error) {
 		order = append(order, "config")
-		return &config.Config{}, nil
+		return testRuntimeConfig(), nil
 	}
 	newRuntimeLoggerFn = func(context.Context, ...logging.Option) (*logging.RuntimeLogger, error) {
 		return &logging.RuntimeLogger{Logger: testLogger()}, nil
@@ -145,7 +168,7 @@ func TestRunSetsRootSpanStatusOnSuccessAndFailure(t *testing.T) {
 	defer restore()
 
 	initTelemetryFn = func(context.Context) (func(), error) { return func() {}, nil }
-	loadConfigFn = func(context.Context) (*config.Config, error) { return &config.Config{}, nil }
+	loadConfigFn = func(context.Context) (*config.Config, error) { return testRuntimeConfig(), nil }
 	newRuntimeLoggerFn = func(context.Context, ...logging.Option) (*logging.RuntimeLogger, error) {
 		return &logging.RuntimeLogger{Logger: testLogger()}, nil
 	}
@@ -186,7 +209,7 @@ func TestRunRootSpanAttributesContainRunIDAndRedactedArgs(t *testing.T) {
 	t.Setenv("SC3_ENV", "test")
 
 	initTelemetryFn = func(context.Context) (func(), error) { return func() {}, nil }
-	loadConfigFn = func(context.Context) (*config.Config, error) { return &config.Config{}, nil }
+	loadConfigFn = func(context.Context) (*config.Config, error) { return testRuntimeConfig(), nil }
 	newRuntimeLoggerFn = func(context.Context, ...logging.Option) (*logging.RuntimeLogger, error) {
 		return &logging.RuntimeLogger{Logger: testLogger()}, nil
 	}
@@ -253,7 +276,7 @@ func TestRunWritesCorrelatedLogFieldsFromRootSpan(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	initTelemetryFn = func(context.Context) (func(), error) { return func() {}, nil }
-	loadConfigFn = func(context.Context) (*config.Config, error) { return &config.Config{}, nil }
+	loadConfigFn = func(context.Context) (*config.Config, error) { return testRuntimeConfig(), nil }
 	newRuntimeLoggerFn = func(ctx context.Context, options ...logging.Option) (*logging.RuntimeLogger, error) {
 		return logging.New(ctx, options...)
 	}
@@ -325,6 +348,54 @@ func TestRunWritesCorrelatedLogFieldsFromRootSpan(t *testing.T) {
 	}
 }
 
+func TestRunDebugMirrorsLogsToStderrForNonTUICommands(t *testing.T) {
+	restore := snapshotRunHooks()
+	defer restore()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	initTelemetryFn = func(context.Context) (func(), error) { return func() {}, nil }
+	loadConfigFn = func(context.Context) (*config.Config, error) { return testRuntimeConfig(), nil }
+	newRuntimeLoggerFn = func(ctx context.Context, options ...logging.Option) (*logging.RuntimeLogger, error) {
+		return logging.New(ctx, options...)
+	}
+	startCommandSpanFn = func(ctx context.Context, _ string, _ []attribute.KeyValue) (context.Context, commandSpan) {
+		return ctx, newFakeCommandSpan()
+	}
+
+	stderr := captureRunStderr(t, func() error {
+		return run(context.Background(), []string{"--debug", "plan"})
+	})
+	if !strings.Contains(stderr, "command scaffold executed") {
+		t.Fatalf("expected debug mode console output on stderr, got: %q", stderr)
+	}
+}
+
+func TestRunDebugDoesNotMirrorLogsForTUICommand(t *testing.T) {
+	restore := snapshotRunHooks()
+	defer restore()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	initTelemetryFn = func(context.Context) (func(), error) { return func() {}, nil }
+	loadConfigFn = func(context.Context) (*config.Config, error) { return testRuntimeConfig(), nil }
+	newRuntimeLoggerFn = func(ctx context.Context, options ...logging.Option) (*logging.RuntimeLogger, error) {
+		return logging.New(ctx, options...)
+	}
+	startCommandSpanFn = func(ctx context.Context, _ string, _ []attribute.KeyValue) (context.Context, commandSpan) {
+		return ctx, newFakeCommandSpan()
+	}
+
+	stderr := captureRunStderr(t, func() error {
+		return run(context.Background(), []string{"--debug", "tui"})
+	})
+	if strings.Contains(stderr, "command scaffold executed") {
+		t.Fatalf("expected no mirrored stderr logs for tui command, got: %q", stderr)
+	}
+}
+
 func snapshotRunHooks() func() {
 	prevLoadConfig := loadConfigFn
 	prevNewLogger := newRuntimeLoggerFn
@@ -338,6 +409,43 @@ func snapshotRunHooks() func() {
 		initTelemetryFn = prevInitTelemetry
 		newRootCommandFn = prevRootCommand
 		startCommandSpanFn = prevStartSpan
+	}
+}
+
+func captureRunStderr(t *testing.T, runFn func() error) string {
+	t.Helper()
+
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stderr: %v", err)
+	}
+	originalStderr := os.Stderr
+	os.Stderr = writer
+	t.Cleanup(func() {
+		os.Stderr = originalStderr
+	})
+
+	runErr := runFn()
+	if closeErr := writer.Close(); closeErr != nil {
+		t.Fatalf("close stderr writer: %v", closeErr)
+	}
+	data, readErr := io.ReadAll(reader)
+	if readErr != nil {
+		t.Fatalf("read stderr: %v", readErr)
+	}
+	if closeErr := reader.Close(); closeErr != nil {
+		t.Fatalf("close stderr reader: %v", closeErr)
+	}
+	if runErr != nil {
+		t.Fatalf("run: %v", runErr)
+	}
+	return string(data)
+}
+
+func testRuntimeConfig() *config.Config {
+	return &config.Config{
+		LogMaxSizeBytes: 10 * 1024 * 1024,
+		LogMaxFiles:     5,
 	}
 }
 

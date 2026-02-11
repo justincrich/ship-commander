@@ -99,6 +99,7 @@ func run(ctx context.Context, args []string) error {
 	var rootSpan commandSpan
 	loggerOptions := make([]logging.Option, 0, 3)
 	commandName := resolveCommandName(args)
+	debugEnabled := hasDebugFlag(args)
 	if commandName != "bugreport" {
 		runID := uuid.NewString()
 		attrs := rootSpanAttributes(commandName, runID, args)
@@ -119,6 +120,18 @@ func run(ctx context.Context, args []string) error {
 	cfg, err := loadConfigFn(spanContext)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+	loggerOptions = append(
+		loggerOptions,
+		logging.WithMaxSizeBytes(cfg.LogMaxSizeBytes),
+		logging.WithMaxFiles(cfg.LogMaxFiles),
+	)
+	if debugEnabled && commandName != "tui" {
+		loggerOptions = append(
+			loggerOptions,
+			logging.WithConsoleStderr(true),
+			logging.WithLevel(log.DebugLevel),
+		)
 	}
 
 	logger, err := newRuntimeLoggerFn(spanContext, loggerOptions...)
@@ -158,6 +171,7 @@ func newRootCommand(ctx context.Context, cfg *config.Config, logger *log.Logger)
 	}
 
 	root.SetVersionTemplate("{{printf \"%s\\n\" .Version}}")
+	root.PersistentFlags().BoolP("debug", "d", false, "Enable debug logging to stderr for non-TUI commands")
 	root.AddCommand(
 		newLeafCommand("init", "Initialize Ship Commander 3 project state", logger),
 		newLeafCommand("plan", "Run Ready Room mission planning", logger),
@@ -210,6 +224,32 @@ func resolveCommandName(args []string) string {
 		return trimmed
 	}
 	return "root"
+}
+
+func hasDebugFlag(args []string) bool {
+	debugEnabled := false
+	for _, arg := range args {
+		trimmed := strings.TrimSpace(arg)
+		switch {
+		case trimmed == "--debug" || trimmed == "-d":
+			debugEnabled = true
+		case strings.HasPrefix(trimmed, "--debug="):
+			debugEnabled = parseTruthyFlag(strings.TrimSpace(strings.TrimPrefix(trimmed, "--debug=")))
+		case strings.HasPrefix(trimmed, "-d="):
+			debugEnabled = parseTruthyFlag(strings.TrimSpace(strings.TrimPrefix(trimmed, "-d=")))
+		}
+	}
+	return debugEnabled
+}
+
+func parseTruthyFlag(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	switch lower {
+	case "", "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
 }
 
 func rootSpanAttributes(commandName, runID string, args []string) []attribute.KeyValue {

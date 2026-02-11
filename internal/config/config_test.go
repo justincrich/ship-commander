@@ -55,6 +55,12 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.GateTimeout != defaultGateTimeout {
 		t.Fatalf("gate_timeout = %s, want %s", cfg.GateTimeout, defaultGateTimeout)
 	}
+	if cfg.LogMaxSizeBytes != defaultLogMaxSizeBytes {
+		t.Fatalf("log_max_size_bytes = %d, want %d", cfg.LogMaxSizeBytes, defaultLogMaxSizeBytes)
+	}
+	if cfg.LogMaxFiles != defaultLogMaxFiles {
+		t.Fatalf("log_max_files = %d, want %d", cfg.LogMaxFiles, defaultLogMaxFiles)
+	}
 }
 
 func TestLoadOverlayProjectOverHome(t *testing.T) {
@@ -67,14 +73,16 @@ default_harness = "home-harness"
 default_model = "home-model"
 wip_limit = 9
 stuck_timeout = "9m"
-`)
+log_max_size_mb = 20
+	`)
 
 	writeFile(t, filepath.Join(work, ".sc3", "config.toml"), `
 default_model = "project-model"
 max_revisions = 7
 heartbeat_interval = "45s"
 gate_timeout = "3m"
-`)
+log_max_files = 7
+	`)
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -114,6 +122,12 @@ gate_timeout = "3m"
 	}
 	if cfg.GateTimeout != 3*time.Minute {
 		t.Fatalf("gate_timeout = %s, want 3m", cfg.GateTimeout)
+	}
+	if cfg.LogMaxSizeBytes != 20*1024*1024 {
+		t.Fatalf("log_max_size_bytes = %d, want %d", cfg.LogMaxSizeBytes, 20*1024*1024)
+	}
+	if cfg.LogMaxFiles != 7 {
+		t.Fatalf("log_max_files = %d, want 7", cfg.LogMaxFiles)
 	}
 }
 

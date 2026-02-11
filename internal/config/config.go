@@ -20,6 +20,8 @@ const (
 	defaultStuckTimeout       = 5 * time.Minute
 	defaultHeartbeatInterval  = 30 * time.Second
 	defaultGateTimeout        = 120 * time.Second
+	defaultLogMaxSizeBytes    = 10 * 1024 * 1024
+	defaultLogMaxFiles        = 5
 )
 
 // Config stores runtime settings loaded from TOML files.
@@ -32,6 +34,8 @@ type Config struct {
 	StuckTimeout          time.Duration
 	HeartbeatInterval     time.Duration
 	GateTimeout           time.Duration
+	LogMaxSizeBytes       int64
+	LogMaxFiles           int
 }
 
 type fileConfig struct {
@@ -43,6 +47,8 @@ type fileConfig struct {
 	StuckTimeout          *string `toml:"stuck_timeout"`
 	HeartbeatInterval     *string `toml:"heartbeat_interval"`
 	GateTimeout           *string `toml:"gate_timeout"`
+	LogMaxSizeMB          *int    `toml:"log_max_size_mb"`
+	LogMaxFiles           *int    `toml:"log_max_files"`
 }
 
 // Load reads config from ~/.sc3/config.toml and overlays a project-local .sc3/config.toml.
@@ -84,6 +90,8 @@ func defaults() Config {
 		StuckTimeout:          defaultStuckTimeout,
 		HeartbeatInterval:     defaultHeartbeatInterval,
 		GateTimeout:           defaultGateTimeout,
+		LogMaxSizeBytes:       defaultLogMaxSizeBytes,
+		LogMaxFiles:           defaultLogMaxFiles,
 	}
 }
 
@@ -140,6 +148,18 @@ func overlayFromFile(cfg *Config, path string) error {
 			return err
 		}
 		cfg.GateTimeout = value
+	}
+	if decoded.LogMaxSizeMB != nil {
+		if *decoded.LogMaxSizeMB <= 0 {
+			return fmt.Errorf("parse log_max_size_mb in %q: must be > 0", path)
+		}
+		cfg.LogMaxSizeBytes = int64(*decoded.LogMaxSizeMB) * 1024 * 1024
+	}
+	if decoded.LogMaxFiles != nil {
+		if *decoded.LogMaxFiles <= 0 {
+			return fmt.Errorf("parse log_max_files in %q: must be > 0", path)
+		}
+		cfg.LogMaxFiles = *decoded.LogMaxFiles
 	}
 
 	return nil
