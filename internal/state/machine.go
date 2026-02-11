@@ -1,10 +1,16 @@
 package state
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // EntityType identifies which state machine to evaluate.
@@ -128,6 +134,19 @@ type Persister interface {
 	AddComment(id, comment string) error
 }
 
+// Option configures Machine construction.
+type Option func(*Machine)
+
+// WithTracer configures the tracer used for state transition spans.
+func WithTracer(tracer trace.Tracer) Option {
+	return func(machine *Machine) {
+		if tracer == nil {
+			return
+		}
+		machine.tracer = tracer
+	}
+}
+
 // TransitionRecord stores transition metadata for local history.
 type TransitionRecord struct {
 	EntityType EntityType
@@ -173,12 +192,13 @@ func (e *IllegalTransitionError) Is(target error) bool {
 type Machine struct {
 	persister Persister
 	actor     string
+	tracer    trace.Tracer
 	now       func() time.Time
 	history   []TransitionRecord
 }
 
 // NewMachine builds a deterministic state machine persister.
-func NewMachine(persister Persister, actor string) (*Machine, error) {
+func NewMachine(persister Persister, actor string, options ...Option) (*Machine, error) {
 	if persister == nil {
 		return nil, errors.New("persister is required")
 	}
@@ -188,38 +208,78 @@ func NewMachine(persister Persister, actor string) (*Machine, error) {
 		normalizedActor = "commander"
 	}
 
-	return &Machine{
+	machine := &Machine{
 		persister: persister,
 		actor:     normalizedActor,
+		tracer:    otel.Tracer("sc3/state"),
 		now:       time.Now,
 		history:   []TransitionRecord{},
-	}, nil
+	}
+	for _, option := range options {
+		if option == nil {
+			continue
+		}
+		option(machine)
+	}
+	if machine.tracer == nil {
+		machine.tracer = otel.Tracer("sc3/state")
+	}
+
+	return machine, nil
 }
 
 // Transition validates and persists one state transition.
-func (m *Machine) Transition(entityType EntityType, entityID, fromState, toState, reason string) error {
+func (m *Machine) Transition(ctx context.Context, entityType EntityType, entityID, fromState, toState, reason string) error {
 	if m == nil {
 		return errors.New("machine is nil")
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	started := time.Now()
+	normalizedReason := strings.TrimSpace(reason)
+
+	ctx, span := m.tracer.Start(ctx, "state.transition")
+	defer func() {
+		span.SetAttributes(attribute.Int64("duration_ms", time.Since(started).Milliseconds()))
+		span.End()
+	}()
 
 	entityID = strings.TrimSpace(entityID)
-	if entityID == "" {
-		return errors.New("entity id must not be empty")
-	}
 	fromState = strings.TrimSpace(fromState)
 	toState = strings.TrimSpace(toState)
+	span.SetAttributes(
+		attribute.String("entity_type", string(entityType)),
+		attribute.String("entity_id", entityID),
+		attribute.String("from_state", fromState),
+		attribute.String("to_state", toState),
+		attribute.String("reason", normalizedReason),
+	)
+
+	if entityID == "" {
+		err := errors.New("entity id must not be empty")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
 	if fromState == "" || toState == "" {
-		return errors.New("from and to states must not be empty")
+		err := errors.New("from and to states must not be empty")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
 	}
 
 	if !isAllowed(entityType, fromState, toState) {
-		return &IllegalTransitionError{
+		err := &IllegalTransitionError{
 			EntityType: entityType,
 			EntityID:   entityID,
 			FromState:  fromState,
 			ToState:    toState,
 			Reason:     "illegal transition for entity lifecycle",
 		}
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
 	}
 
 	timestamp := m.now().UTC()
@@ -228,13 +288,16 @@ func (m *Machine) Transition(entityType EntityType, entityID, fromState, toState
 		EntityID:   entityID,
 		FromState:  fromState,
 		ToState:    toState,
-		Reason:     strings.TrimSpace(reason),
+		Reason:     normalizedReason,
 		Actor:      m.actor,
 		Timestamp:  timestamp,
 	}
 
 	if err := m.persister.SetState(entityID, stateDimension(entityType), toState); err != nil {
-		return fmt.Errorf("persist state transition for %s: %w", entityID, err)
+		wrapped := fmt.Errorf("persist state transition for %s: %w", entityID, err)
+		span.RecordError(wrapped)
+		span.SetStatus(codes.Error, wrapped.Error())
+		return wrapped
 	}
 
 	comment := fmt.Sprintf(
@@ -247,10 +310,16 @@ func (m *Machine) Transition(entityType EntityType, entityID, fromState, toState
 		record.Reason,
 	)
 	if err := m.persister.AddComment(entityID, comment); err != nil {
-		return fmt.Errorf("persist transition event for %s: %w", entityID, err)
+		wrapped := fmt.Errorf("persist transition event for %s: %w", entityID, err)
+		span.RecordError(wrapped)
+		span.SetStatus(codes.Error, wrapped.Error())
+		return wrapped
 	}
 
 	m.history = append(m.history, record)
+	span.SetStatus(codes.Ok, "state transition persisted")
+
+	_ = ctx
 	return nil
 }
 

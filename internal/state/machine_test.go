@@ -1,11 +1,17 @@
 package state
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestTransitionEnforcesAllowedStateMachines(t *testing.T) {
@@ -81,7 +87,7 @@ func TestTransitionEnforcesAllowedStateMachines(t *testing.T) {
 			}
 
 			for _, step := range tt.sequence {
-				err := machine.Transition(tt.entity, tt.entityID, step[0], step[1], "transition")
+				err := machine.Transition(context.Background(), tt.entity, tt.entityID, step[0], step[1], "transition")
 				if err != nil {
 					t.Fatalf("transition %s -> %s: %v", step[0], step[1], err)
 				}
@@ -109,6 +115,7 @@ func TestTransitionRejectsIllegalTransitionWithTypedError(t *testing.T) {
 	}
 
 	err = machine.Transition(
+		context.Background(),
 		EntityMission,
 		"MISSION-42",
 		MissionBacklog,
@@ -156,6 +163,7 @@ func TestTransitionRecordsTimestampActorAndReason(t *testing.T) {
 	machine.now = func() time.Time { return fixed }
 
 	if err := machine.Transition(
+		context.Background(),
 		EntityCommission,
 		"COMM-1",
 		CommissionPlanning,
@@ -192,6 +200,7 @@ func TestTransitionPersistsSetStateAndComment(t *testing.T) {
 	}
 
 	if err := machine.Transition(
+		context.Background(),
 		EntityAC,
 		"MISSION-1",
 		ACRed,
@@ -256,6 +265,7 @@ func TestTransitionWrapsSetStateAndCommentErrors(t *testing.T) {
 			}
 
 			err = machine.Transition(
+				context.Background(),
 				EntityCommission,
 				"COMM-1",
 				CommissionPlanning,
@@ -270,6 +280,128 @@ func TestTransitionWrapsSetStateAndCommentErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTransitionCreatesSpanWithRequiredAttributes(t *testing.T) {
+	t.Parallel()
+
+	spanRecorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
+	t.Cleanup(func() {
+		if err := provider.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown tracer provider: %v", err)
+		}
+	})
+
+	persister := &fakePersister{}
+	machine, err := NewMachine(persister, "commander", WithTracer(provider.Tracer("state-test")))
+	if err != nil {
+		t.Fatalf("new machine: %v", err)
+	}
+
+	if err := machine.Transition(
+		context.Background(),
+		EntityCommission,
+		"COMM-7",
+		CommissionPlanning,
+		CommissionApproved,
+		"admiral approved",
+	); err != nil {
+		t.Fatalf("transition: %v", err)
+	}
+
+	span := findTransitionSpan(t, spanRecorder.Ended())
+	attrs := attributesToMap(span.Attributes())
+
+	if span.Name() != "state.transition" {
+		t.Fatalf("span name = %q, want %q", span.Name(), "state.transition")
+	}
+	if got := attrs["entity_type"]; got != string(EntityCommission) {
+		t.Fatalf("entity_type = %q, want %q", got, string(EntityCommission))
+	}
+	if got := attrs["entity_id"]; got != "COMM-7" {
+		t.Fatalf("entity_id = %q, want %q", got, "COMM-7")
+	}
+	if got := attrs["from_state"]; got != CommissionPlanning {
+		t.Fatalf("from_state = %q, want %q", got, CommissionPlanning)
+	}
+	if got := attrs["to_state"]; got != CommissionApproved {
+		t.Fatalf("to_state = %q, want %q", got, CommissionApproved)
+	}
+	if got := attrs["reason"]; got != "admiral approved" {
+		t.Fatalf("reason = %q, want %q", got, "admiral approved")
+	}
+	if _, ok := attrs["duration_ms"]; !ok {
+		t.Fatal("duration_ms attribute missing")
+	}
+}
+
+func TestTransitionRecordsErrorsAndUsesParentContext(t *testing.T) {
+	t.Parallel()
+
+	spanRecorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
+	t.Cleanup(func() {
+		if err := provider.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown tracer provider: %v", err)
+		}
+	})
+
+	tracer := provider.Tracer("state-test")
+	persister := &fakePersister{setStateErr: errors.New("store failed")}
+	machine, err := NewMachine(persister, "commander", WithTracer(tracer))
+	if err != nil {
+		t.Fatalf("new machine: %v", err)
+	}
+
+	parentCtx, parentSpan := tracer.Start(context.Background(), "parent")
+	err = machine.Transition(
+		parentCtx,
+		EntityCommission,
+		"COMM-9",
+		CommissionPlanning,
+		CommissionApproved,
+		"persist failure",
+	)
+	parentSpan.End()
+
+	if err == nil {
+		t.Fatal("expected transition error, got nil")
+	}
+
+	transitionSpan := findTransitionSpan(t, spanRecorder.Ended())
+	if transitionSpan.Parent().SpanID() != parentSpan.SpanContext().SpanID() {
+		t.Fatalf(
+			"transition span parent = %s, want %s",
+			transitionSpan.Parent().SpanID(),
+			parentSpan.SpanContext().SpanID(),
+		)
+	}
+	if transitionSpan.Status().Code != codes.Error {
+		t.Fatalf("status code = %v, want %v", transitionSpan.Status().Code, codes.Error)
+	}
+	if len(transitionSpan.Events()) == 0 {
+		t.Fatal("expected at least one event recorded on error span")
+	}
+}
+
+func findTransitionSpan(t *testing.T, spans []sdktrace.ReadOnlySpan) sdktrace.ReadOnlySpan {
+	t.Helper()
+	for _, span := range spans {
+		if span.Name() == "state.transition" {
+			return span
+		}
+	}
+	t.Fatalf("state.transition span not found in %d spans", len(spans))
+	return nil
+}
+
+func attributesToMap(attrs []attribute.KeyValue) map[string]string {
+	out := make(map[string]string, len(attrs))
+	for _, attr := range attrs {
+		out[string(attr.Key)] = attr.Value.Emit()
+	}
+	return out
 }
 
 type setStateCall struct {
