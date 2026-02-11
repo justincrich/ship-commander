@@ -111,6 +111,27 @@ func TestHasDebugFlag(t *testing.T) {
 	}
 }
 
+func TestHasSkipInvariantChecksFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "long flag", args: []string{"--skip-invariant-checks", "plan"}, want: true},
+		{name: "explicit false", args: []string{"--skip-invariant-checks=false", "plan"}, want: false},
+		{name: "unset", args: []string{"plan"}, want: false},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hasSkipInvariantChecksFlag(tc.args); got != tc.want {
+				t.Fatalf("hasSkipInvariantChecksFlag(%v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRedactArgs(t *testing.T) {
 	input := []string{
 		"execute",
@@ -396,10 +417,41 @@ func TestRunDebugDoesNotMirrorLogsForTUICommand(t *testing.T) {
 	}
 }
 
+func TestRunSetsInvariantChecksFromFlags(t *testing.T) {
+	restore := snapshotRunHooks()
+	defer restore()
+
+	initTelemetryFn = func(context.Context) (func(), error) { return func() {}, nil }
+	loadConfigFn = func(context.Context) (*config.Config, error) { return testRuntimeConfig(), nil }
+	newRuntimeLoggerFn = func(context.Context, ...logging.Option) (*logging.RuntimeLogger, error) {
+		return &logging.RuntimeLogger{Logger: testLogger()}, nil
+	}
+	startCommandSpanFn = func(ctx context.Context, _ string, _ []attribute.KeyValue) (context.Context, commandSpan) {
+		return ctx, newFakeCommandSpan()
+	}
+
+	enabledStates := make([]bool, 0, 2)
+	setInvariantChecksEnabledFn = func(enabled bool) {
+		enabledStates = append(enabledStates, enabled)
+	}
+
+	if err := run(context.Background(), []string{"plan"}); err != nil {
+		t.Fatalf("run default invariants enabled: %v", err)
+	}
+	if err := run(context.Background(), []string{"--skip-invariant-checks", "plan"}); err != nil {
+		t.Fatalf("run skip invariants: %v", err)
+	}
+
+	if !reflect.DeepEqual(enabledStates, []bool{true, false}) {
+		t.Fatalf("invariant enabled states = %v, want [true false]", enabledStates)
+	}
+}
+
 func snapshotRunHooks() func() {
 	prevLoadConfig := loadConfigFn
 	prevNewLogger := newRuntimeLoggerFn
 	prevInitTelemetry := initTelemetryFn
+	prevSetInvariantChecks := setInvariantChecksEnabledFn
 	prevRootCommand := newRootCommandFn
 	prevStartSpan := startCommandSpanFn
 
@@ -407,6 +459,7 @@ func snapshotRunHooks() func() {
 		loadConfigFn = prevLoadConfig
 		newRuntimeLoggerFn = prevNewLogger
 		initTelemetryFn = prevInitTelemetry
+		setInvariantChecksEnabledFn = prevSetInvariantChecks
 		newRootCommandFn = prevRootCommand
 		startCommandSpanFn = prevStartSpan
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ship-commander/sc3/internal/telemetry/invariants"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -270,6 +271,14 @@ func (m *Machine) Transition(ctx context.Context, entityType EntityType, entityI
 	}
 
 	if !isAllowed(entityType, fromState, toState) {
+		invariants.CheckStateTransitionLegal(
+			ctx,
+			"state.machine.transition",
+			string(entityType),
+			fromState,
+			toState,
+			false,
+		)
 		err := &IllegalTransitionError{
 			EntityType: entityType,
 			EntityID:   entityID,

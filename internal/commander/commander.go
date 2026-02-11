@@ -14,6 +14,7 @@ import (
 
 	"github.com/ship-commander/sc3/internal/admiral"
 	"github.com/ship-commander/sc3/internal/protocol"
+	"github.com/ship-commander/sc3/internal/telemetry/invariants"
 )
 
 const (
@@ -418,6 +419,18 @@ func (c *Commander) runBatch(ctx context.Context, waveIndex int, batch []Mission
 
 func (c *Commander) runMission(ctx context.Context, waveIndex int, mission Mission) error {
 	if reason, message, shouldHalt := haltBeforeDispatch(mission); shouldHalt {
+		if reason == HaltReasonMaxRevisionsExceeded {
+			maxRevisions := mission.MaxRevisions
+			if maxRevisions <= 0 {
+				maxRevisions = DefaultMaxRevisions
+			}
+			invariants.CheckMaxRetriesNotExceeded(
+				ctx,
+				"commander.runMission",
+				mission.RevisionCount,
+				maxRevisions,
+			)
+		}
 		_ = c.publishHalt(ctx, waveIndex, mission.ID, reason, message)
 		return fmt.Errorf("mission %s halted before dispatch: %s", mission.ID, message)
 	}
@@ -428,6 +441,19 @@ func (c *Commander) runMission(ctx context.Context, waveIndex int, mission Missi
 		return fmt.Errorf("create worktree for %s: %w", mission.ID, err)
 	}
 	c.missionPaths.Store(mission.ID, worktreePath)
+	cleanRepo, repoStatus := isGitWorktreeClean(ctx, worktreePath)
+	invariants.CheckRepoCleanBeforeMerge(
+		ctx,
+		"commander.runMission",
+		cleanRepo,
+		repoStatus,
+	)
+	invariants.CheckEditsWithinAllowedPaths(
+		ctx,
+		"commander.runMission",
+		mission.SurfaceArea,
+		nil,
+	)
 
 	release, err := c.locks.Acquire(ctx, mission.ID, mission.SurfaceArea)
 	if err != nil {
@@ -502,6 +528,12 @@ func (c *Commander) verifyMissionOutput(
 ) error {
 	if isStandardOpsMission(mission) {
 		if err := c.verifier.VerifyImplement(ctx, mission, worktreePath); err != nil {
+			invariants.CheckPatchApplyClean(
+				ctx,
+				"commander.verifyMissionOutput",
+				!looksLikePatchFailure(err),
+				err.Error(),
+			)
 			_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, fmt.Sprintf("verification failed: %v", err))
 			return fmt.Errorf("verify implement mission %s: %w", mission.ID, err)
 		}
@@ -519,6 +551,12 @@ func (c *Commander) verifyMissionOutput(
 	}
 
 	if err := c.verifier.Verify(ctx, mission, worktreePath); err != nil {
+		invariants.CheckPatchApplyClean(
+			ctx,
+			"commander.verifyMissionOutput",
+			!looksLikePatchFailure(err),
+			err.Error(),
+		)
 		_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, fmt.Sprintf("verification failed: %v", err))
 		return fmt.Errorf("verify mission %s: %w", mission.ID, err)
 	}
@@ -587,6 +625,12 @@ func (c *Commander) handleReviewVerdict(
 		mission.RevisionCount++
 		mission.ReviewFeedback = strings.TrimSpace(verdict.Feedback)
 		if mission.RevisionCount >= maxRevisions {
+			invariants.CheckMaxRetriesNotExceeded(
+				ctx,
+				"commander.handleReviewVerdict",
+				mission.RevisionCount,
+				maxRevisions,
+			)
 			message := fmt.Sprintf(
 				"review requested fixes and revision count %d reached max revisions %d",
 				mission.RevisionCount,
@@ -876,6 +920,30 @@ func gitDiff(ctx context.Context, worktreePath string) (string, error) {
 		return "", fmt.Errorf("git diff: %w (%s)", err, trimmed)
 	}
 	return string(out), nil
+}
+
+func isGitWorktreeClean(ctx context.Context, worktreePath string) (bool, string) {
+	out, err := exec.CommandContext(ctx, "git", "-C", worktreePath, "status", "--porcelain").CombinedOutput()
+	if err != nil {
+		trimmed := strings.TrimSpace(string(out))
+		if trimmed == "" {
+			trimmed = err.Error()
+		}
+		return false, trimmed
+	}
+	trimmed := strings.TrimSpace(string(out))
+	return trimmed == "", trimmed
+}
+
+func looksLikePatchFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "patch") ||
+		strings.Contains(text, "hunk") ||
+		strings.Contains(text, "fuzz") ||
+		strings.Contains(text, "reject")
 }
 
 func readDemoToken(worktreePath string, missionID string) (string, error) {

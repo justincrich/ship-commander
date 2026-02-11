@@ -13,6 +13,7 @@ import (
 	"github.com/ship-commander/sc3/internal/config"
 	"github.com/ship-commander/sc3/internal/logging"
 	"github.com/ship-commander/sc3/internal/telemetry"
+	"github.com/ship-commander/sc3/internal/telemetry/invariants"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -64,9 +65,10 @@ var (
 	newRuntimeLoggerFn = func(ctx context.Context, options ...logging.Option) (*logging.RuntimeLogger, error) {
 		return logging.New(ctx, options...)
 	}
-	initTelemetryFn    = telemetry.Init
-	newRootCommandFn   = newRootCommand
-	startCommandSpanFn = func(ctx context.Context, commandName string, attrs []attribute.KeyValue) (context.Context, commandSpan) {
+	initTelemetryFn             = telemetry.Init
+	setInvariantChecksEnabledFn = invariants.SetEnabled
+	newRootCommandFn            = newRootCommand
+	startCommandSpanFn          = func(ctx context.Context, commandName string, attrs []attribute.KeyValue) (context.Context, commandSpan) {
 		spanCtx, span := otel.Tracer("sc3/command").Start(
 			ctx,
 			"sc3."+commandName,
@@ -100,6 +102,7 @@ func run(ctx context.Context, args []string) error {
 	loggerOptions := make([]logging.Option, 0, 3)
 	commandName := resolveCommandName(args)
 	debugEnabled := hasDebugFlag(args)
+	skipInvariantChecks := hasSkipInvariantChecksFlag(args)
 	if commandName != "bugreport" {
 		runID := uuid.NewString()
 		attrs := rootSpanAttributes(commandName, runID, args)
@@ -121,6 +124,7 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	setInvariantChecksEnabledFn(!skipInvariantChecks)
 	loggerOptions = append(
 		loggerOptions,
 		logging.WithMaxSizeBytes(cfg.LogMaxSizeBytes),
@@ -172,6 +176,7 @@ func newRootCommand(ctx context.Context, cfg *config.Config, logger *log.Logger)
 
 	root.SetVersionTemplate("{{printf \"%s\\n\" .Version}}")
 	root.PersistentFlags().BoolP("debug", "d", false, "Enable debug logging to stderr for non-TUI commands")
+	root.PersistentFlags().Bool("skip-invariant-checks", false, "Disable invariant violation telemetry checks (emergency only)")
 	root.AddCommand(
 		newLeafCommand("init", "Initialize Ship Commander 3 project state", logger),
 		newLeafCommand("plan", "Run Ready Room mission planning", logger),
@@ -240,6 +245,20 @@ func hasDebugFlag(args []string) bool {
 		}
 	}
 	return debugEnabled
+}
+
+func hasSkipInvariantChecksFlag(args []string) bool {
+	enabled := false
+	for _, arg := range args {
+		trimmed := strings.TrimSpace(arg)
+		switch {
+		case trimmed == "--skip-invariant-checks":
+			enabled = true
+		case strings.HasPrefix(trimmed, "--skip-invariant-checks="):
+			enabled = parseTruthyFlag(strings.TrimSpace(strings.TrimPrefix(trimmed, "--skip-invariant-checks=")))
+		}
+	}
+	return enabled
 }
 
 func parseTruthyFlag(value string) bool {
