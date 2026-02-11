@@ -163,6 +163,12 @@ func (e *IllegalTransitionError) Error() string {
 	)
 }
 
+// Is enables errors.Is checks for illegal transition failures.
+func (e *IllegalTransitionError) Is(target error) bool {
+	_, ok := target.(*IllegalTransitionError)
+	return ok
+}
+
 // Machine validates and persists deterministic state transitions.
 type Machine struct {
 	persister Persister

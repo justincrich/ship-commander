@@ -123,6 +123,9 @@ func TestTransitionRejectsIllegalTransitionWithTypedError(t *testing.T) {
 	if !errors.As(err, &illegalErr) {
 		t.Fatalf("error = %T, want *IllegalTransitionError", err)
 	}
+	if !errors.Is(err, &IllegalTransitionError{}) {
+		t.Fatalf("errors.Is(%v, IllegalTransitionError{}) = false, want true", err)
+	}
 	if illegalErr.EntityType != EntityMission {
 		t.Fatalf("entity type = %s, want %s", illegalErr.EntityType, EntityMission)
 	}
