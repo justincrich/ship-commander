@@ -412,6 +412,12 @@ func TestRunDebugMirrorsLogsToStderrForNonTUICommands(t *testing.T) {
 	if !strings.Contains(stderr, "command scaffold executed") {
 		t.Fatalf("expected debug mode console output on stderr, got: %q", stderr)
 	}
+	if !strings.Contains(stderr, "\"logging\":\"DEBUG\"") {
+		t.Fatalf("expected debug logging marker in stderr output, got: %q", stderr)
+	}
+	if !strings.Contains(stderr, "\"otel_exporter\":\"console\"") {
+		t.Fatalf("expected console exporter marker in stderr output, got: %q", stderr)
+	}
 }
 
 func TestRunDebugDoesNotMirrorLogsForTUICommand(t *testing.T) {
@@ -501,10 +507,53 @@ func TestRunSetsTelemetryEndpointOverrideFromFlags(t *testing.T) {
 	}
 }
 
+func TestRunSetsTelemetryDebugConsoleExporterFromFlags(t *testing.T) {
+	restore := snapshotRunHooks()
+	defer restore()
+
+	initTelemetryFn = func(context.Context) (func(), error) { return func() {}, nil }
+	loadConfigFn = func(context.Context) (*config.Config, error) { return testRuntimeConfig(), nil }
+	newRuntimeLoggerFn = func(context.Context, ...logging.Option) (*logging.RuntimeLogger, error) {
+		return &logging.RuntimeLogger{Logger: testLogger()}, nil
+	}
+	startCommandSpanFn = func(ctx context.Context, _ string, _ []attribute.KeyValue) (context.Context, commandSpan) {
+		return ctx, newFakeCommandSpan()
+	}
+
+	values := make([]bool, 0, 4)
+	setTelemetryDebugConsoleExporterFn = func(enabled bool) {
+		values = append(values, enabled)
+	}
+
+	if err := run(context.Background(), []string{"--debug", "plan"}); err != nil {
+		t.Fatalf("run with --debug plan: %v", err)
+	}
+	if err := run(context.Background(), []string{"--debug", "tui"}); err != nil {
+		t.Fatalf("run with --debug tui: %v", err)
+	}
+
+	if len(values) < 4 {
+		t.Fatalf("expected at least four setter calls (set+reset for two runs), got %d", len(values))
+	}
+	if !values[0] {
+		t.Fatalf("first setter call = %v, want true for non-tui debug", values[0])
+	}
+	if values[1] {
+		t.Fatalf("second setter call = %v, want false reset", values[1])
+	}
+	if values[2] {
+		t.Fatalf("third setter call = %v, want false for tui debug", values[2])
+	}
+	if values[3] {
+		t.Fatalf("fourth setter call = %v, want false reset", values[3])
+	}
+}
+
 func snapshotRunHooks() func() {
 	prevLoadConfig := loadConfigFn
 	prevNewLogger := newRuntimeLoggerFn
 	prevSetTelemetryEndpointOverride := setTelemetryEndpointOverrideFn
+	prevSetTelemetryDebugConsoleExporter := setTelemetryDebugConsoleExporterFn
 	prevInitTelemetry := initTelemetryFn
 	prevSetInvariantChecks := setInvariantChecksEnabledFn
 	prevRootCommand := newRootCommandFn
@@ -514,6 +563,7 @@ func snapshotRunHooks() func() {
 		loadConfigFn = prevLoadConfig
 		newRuntimeLoggerFn = prevNewLogger
 		setTelemetryEndpointOverrideFn = prevSetTelemetryEndpointOverride
+		setTelemetryDebugConsoleExporterFn = prevSetTelemetryDebugConsoleExporter
 		initTelemetryFn = prevInitTelemetry
 		setInvariantChecksEnabledFn = prevSetInvariantChecks
 		newRootCommandFn = prevRootCommand

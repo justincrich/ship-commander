@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -52,20 +53,30 @@ var (
 
 	endpointOverrideMu sync.RWMutex
 	endpointOverride   string
+
+	debugExporterMu      sync.RWMutex
+	debugConsoleExporter bool
 )
 
 // Init configures OpenTelemetry with OTLP HTTP exporter, resource attributes, and batch processing.
 func Init(ctx context.Context) (func(), error) {
 	endpoint := resolveEndpoint()
-	exporter, err := exporterFactory(ctx, endpoint)
-	if err != nil {
-		fmt.Fprintf(
-			os.Stderr,
-			"warning: OTLP exporter unavailable for %s (%v); falling back to console exporter\n",
-			endpoint,
-			err,
-		)
+
+	var exporter sdktrace.SpanExporter
+	var err error
+	if debugConsoleExporterEnabled() {
 		exporter = &stderrSpanExporter{out: os.Stderr}
+	} else {
+		exporter, err = exporterFactory(ctx, endpoint)
+		if err != nil {
+			fmt.Fprintf(
+				os.Stderr,
+				"warning: OTLP exporter unavailable for %s (%v); falling back to console exporter\n",
+				endpoint,
+				err,
+			)
+			exporter = &stderrSpanExporter{out: os.Stderr}
+		}
 	}
 
 	res, err := resource.New(
@@ -202,6 +213,19 @@ func SetEndpointOverride(endpoint string) {
 	endpointOverride = strings.TrimSpace(endpoint)
 }
 
+// SetDebugConsoleExporter enables/disables forced console span export mode.
+func SetDebugConsoleExporter(enabled bool) {
+	debugExporterMu.Lock()
+	defer debugExporterMu.Unlock()
+	debugConsoleExporter = enabled
+}
+
+func debugConsoleExporterEnabled() bool {
+	debugExporterMu.RLock()
+	defer debugExporterMu.RUnlock()
+	return debugConsoleExporter
+}
+
 func tlsConfigFromCertificate(path string) (*tls.Config, error) {
 	// #nosec G304 -- certificate path is explicitly provided by OTEL_EXPORTER_OTLP_CERTIFICATE configuration.
 	certPEM, err := os.ReadFile(path)
@@ -225,11 +249,13 @@ func (e *stderrSpanExporter) ExportSpans(_ context.Context, spans []sdktrace.Rea
 	}
 	for _, span := range spans {
 		duration := span.EndTime().Sub(span.StartTime()).Round(time.Millisecond)
-		if _, err := fmt.Fprintf(e.out, "[SPAN] %s %s %v\n", span.Name(), duration, span.Status().Code); err != nil {
+		indent := spanIndent(span)
+		if _, err := fmt.Fprintf(e.out, "%s[SPAN] %s {%s} {%v}\n", indent, span.Name(), duration, span.Status().Code); err != nil {
 			return err
 		}
+		eventIndent := indent + "  "
 		for _, event := range span.Events() {
-			if _, err := fmt.Fprintf(e.out, "  [EVENT] %s\n", event.Name); err != nil {
+			if _, err := fmt.Fprintf(e.out, "%s[EVENT] %s\n", eventIndent, event.Name); err != nil {
 				return err
 			}
 		}
@@ -257,4 +283,22 @@ func setEndpointOverrideForTest(value string) func() {
 	return func() {
 		SetEndpointOverride(previous)
 	}
+}
+
+func setDebugConsoleExporterForTest(value bool) func() {
+	debugExporterMu.RLock()
+	previous := debugConsoleExporter
+	debugExporterMu.RUnlock()
+	SetDebugConsoleExporter(value)
+	return func() {
+		SetDebugConsoleExporter(previous)
+	}
+}
+
+func spanIndent(span sdktrace.ReadOnlySpan) string {
+	parent := span.Parent().SpanID()
+	if !parent.IsValid() || parent == (trace.SpanID{}) {
+		return ""
+	}
+	return "  "
 }

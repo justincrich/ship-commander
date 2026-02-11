@@ -131,6 +131,49 @@ func TestInitFallsBackToConsoleExporterWhenOTLPUnavailable(t *testing.T) {
 	}
 }
 
+func TestInitUsesConsoleExporterWhenDebugModeEnabled(t *testing.T) {
+	restoreOverride := setEndpointOverrideForTest("")
+	defer restoreOverride()
+	restoreDebug := setDebugConsoleExporterForTest(true)
+	defer restoreDebug()
+
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318")
+
+	factoryCalls := 0
+	restoreFactory := setExporterFactoryForTest(func(_ context.Context, _ string) (sdktrace.SpanExporter, error) {
+		factoryCalls++
+		return &fakeExporter{}, nil
+	})
+	defer restoreFactory()
+
+	stderr := captureTelemetryStderr(t, func() {
+		shutdown, err := Init(context.Background())
+		if err != nil {
+			t.Fatalf("init telemetry: %v", err)
+		}
+
+		tracer := otel.Tracer("telemetry-test")
+		parentCtx, parentSpan := tracer.Start(context.Background(), "parent")
+		_, childSpan := tracer.Start(parentCtx, "child")
+		childSpan.End()
+		parentSpan.End()
+		shutdown()
+	})
+
+	if factoryCalls != 0 {
+		t.Fatalf("exporter factory calls = %d, want 0 in debug console mode", factoryCalls)
+	}
+	if !strings.Contains(stderr, "[SPAN] parent {") {
+		t.Fatalf("expected parent span console format with braces, got: %q", stderr)
+	}
+	if !strings.Contains(stderr, "  [SPAN] child {") {
+		t.Fatalf("expected indented child span output, got: %q", stderr)
+	}
+	if strings.Contains(stderr, "falling back to console exporter") {
+		t.Fatalf("did not expect fallback warning when debug console exporter is enabled, got: %q", stderr)
+	}
+}
+
 func TestBatchConfigConstants(t *testing.T) {
 	if BatchSize != 512 {
 		t.Fatalf("BatchSize = %d, want 512", BatchSize)

@@ -65,11 +65,12 @@ var (
 	newRuntimeLoggerFn = func(ctx context.Context, options ...logging.Option) (*logging.RuntimeLogger, error) {
 		return logging.New(ctx, options...)
 	}
-	setTelemetryEndpointOverrideFn = telemetry.SetEndpointOverride
-	initTelemetryFn                = telemetry.Init
-	setInvariantChecksEnabledFn    = invariants.SetEnabled
-	newRootCommandFn               = newRootCommand
-	startCommandSpanFn             = func(ctx context.Context, commandName string, attrs []attribute.KeyValue) (context.Context, commandSpan) {
+	setTelemetryEndpointOverrideFn     = telemetry.SetEndpointOverride
+	setTelemetryDebugConsoleExporterFn = telemetry.SetDebugConsoleExporter
+	initTelemetryFn                    = telemetry.Init
+	setInvariantChecksEnabledFn        = invariants.SetEnabled
+	newRootCommandFn                   = newRootCommand
+	startCommandSpanFn                 = func(ctx context.Context, commandName string, attrs []attribute.KeyValue) (context.Context, commandSpan) {
 		spanCtx, span := otel.Tracer("sc3/command").Start(
 			ctx,
 			"sc3."+commandName,
@@ -89,6 +90,11 @@ func main() {
 func run(ctx context.Context, args []string) error {
 	setTelemetryEndpointOverrideFn(resolveOTelEndpointFlag(args))
 	defer setTelemetryEndpointOverrideFn("")
+	commandName := resolveCommandName(args)
+	debugEnabled := hasDebugFlag(args)
+	debugConsoleExporterEnabled := debugEnabled && commandName != "tui"
+	setTelemetryDebugConsoleExporterFn(debugConsoleExporterEnabled)
+	defer setTelemetryDebugConsoleExporterFn(false)
 
 	telemetry.ServiceVersion = Version
 	shutdownTelemetry, err := initTelemetryFn(ctx)
@@ -104,8 +110,6 @@ func run(ctx context.Context, args []string) error {
 	spanContext := ctx
 	var rootSpan commandSpan
 	loggerOptions := make([]logging.Option, 0, 3)
-	commandName := resolveCommandName(args)
-	debugEnabled := hasDebugFlag(args)
 	skipInvariantChecks := hasSkipInvariantChecksFlag(args)
 	if commandName != "bugreport" {
 		runID := uuid.NewString()
@@ -151,6 +155,9 @@ func run(ctx context.Context, args []string) error {
 			fmt.Fprintf(os.Stderr, "failed to close logger: %v\n", closeErr)
 		}
 	}()
+	if debugConsoleExporterEnabled {
+		logger.Logger.With("logging", "DEBUG", "otel_exporter", "console").Info("debug mode enabled")
+	}
 
 	cmd := newRootCommandFn(spanContext, cfg, logger.Logger)
 	cmd.SetArgs(args)
