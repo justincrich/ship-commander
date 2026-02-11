@@ -1,1 +1,3 @@
 brain
+.worktrees/
+.cdx-swarm-state.json
