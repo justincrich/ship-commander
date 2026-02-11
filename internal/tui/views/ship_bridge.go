@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/ship-commander/sc3/internal/tui/components"
@@ -580,21 +579,6 @@ func renderMissionCard(mission ShipBridgeMission, selected bool, width int) stri
 }
 
 func renderEventLogPanel(events []ShipBridgeEvent, width int, height int) string {
-	if len(events) == 0 {
-		empty := lipgloss.NewStyle().Foreground(theme.GalaxyGrayColor).Faint(true).Render("No recent events")
-		return theme.PanelBorder.Render(panelWithTitle("Event Log", empty))
-	}
-
-	start := 0
-	if len(events) > 50 {
-		start = len(events) - 50
-	}
-
-	lines := make([]string, 0, len(events)-start)
-	for _, event := range events[start:] {
-		lines = append(lines, renderEventLine(event))
-	}
-
 	viewWidth := width - 6
 	if viewWidth < 24 {
 		viewWidth = 24
@@ -604,52 +588,42 @@ func renderEventLogPanel(events []ShipBridgeEvent, width int, height int) string
 		viewHeight = 4
 	}
 
-	logViewport := viewport.New(viewWidth, viewHeight)
-	logViewport.SetContent(strings.Join(lines, "\n"))
-	logViewport.GotoBottom()
+	entries := make([]components.EventLogEntry, 0, len(events))
+	for _, event := range events {
+		eventType := strings.TrimSpace(event.Actor)
+		if eventType == "" {
+			eventType = "system"
+		}
 
-	return theme.PanelBorder.Render(panelWithTitle("Event Log", logViewport.View()))
+		entries = append(entries, components.EventLogEntry{
+			Severity:  mapShipBridgeEventSeverity(event.Severity),
+			Timestamp: event.Timestamp,
+			EventType: eventType,
+			Message:   event.Message,
+		})
+	}
+
+	content := components.RenderEventLog(components.EventLogConfig{
+		Width:          viewWidth,
+		Height:         viewHeight,
+		AutoScroll:     true,
+		MaxEntries:     50,
+		SeverityFilter: []string{"INFO", "WARN", "ERROR"},
+		Events:         entries,
+	})
+
+	return theme.PanelBorder.Render(panelWithTitle("Event Log", content))
 }
 
-func renderEventLine(event ShipBridgeEvent) string {
-	timestamp := strings.TrimSpace(event.Timestamp)
-	if timestamp == "" {
-		timestamp = "--:--:--"
-	}
-	actor := strings.TrimSpace(event.Actor)
-	if actor == "" {
-		actor = "system"
-	}
-	message := strings.TrimSpace(event.Message)
-	if message == "" {
-		message = "(no message)"
-	}
-
-	severity := strings.ToLower(strings.TrimSpace(event.Severity))
-	icon := "ℹ"
-	style := lipgloss.NewStyle().Foreground(theme.BlueColor)
-	switch severity {
+func mapShipBridgeEventSeverity(severity string) string {
+	switch strings.ToLower(strings.TrimSpace(severity)) {
 	case "warn", "warning":
-		icon = theme.IconAlert
-		style = lipgloss.NewStyle().Foreground(theme.YellowCautionColor)
+		return "WARN"
 	case "error", "failed":
-		icon = theme.IconFailed
-		style = lipgloss.NewStyle().Foreground(theme.RedAlertColor)
-	case "success", "done":
-		icon = theme.IconDone
-		style = lipgloss.NewStyle().Foreground(theme.GreenOkColor)
+		return "ERROR"
+	default:
+		return "INFO"
 	}
-
-	return lipgloss.JoinHorizontal(
-		lipgloss.Left,
-		lipgloss.NewStyle().Foreground(theme.LightGrayColor).Render(timestamp),
-		"  ",
-		style.Render(icon),
-		"  ",
-		lipgloss.NewStyle().Foreground(theme.GalaxyGrayColor).Render(actor),
-		"  ",
-		style.Render(message),
-	)
 }
 
 func missionBoardColumnRank(column string) int {
