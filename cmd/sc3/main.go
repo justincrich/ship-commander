@@ -61,7 +61,9 @@ func (a traceSpanAdapter) End(options ...trace.SpanEndOption) {
 
 var (
 	loadConfigFn       = config.Load
-	newRuntimeLoggerFn = logging.New
+	newRuntimeLoggerFn = func(ctx context.Context, options ...logging.Option) (*logging.RuntimeLogger, error) {
+		return logging.New(ctx, options...)
+	}
 	initTelemetryFn    = telemetry.Init
 	newRootCommandFn   = newRootCommand
 	startCommandSpanFn = func(ctx context.Context, commandName string, attrs []attribute.KeyValue) (context.Context, commandSpan) {
@@ -93,12 +95,33 @@ func run(ctx context.Context, args []string) error {
 		}
 	}()
 
-	cfg, err := loadConfigFn(ctx)
+	spanContext := ctx
+	var rootSpan commandSpan
+	loggerOptions := make([]logging.Option, 0, 3)
+	commandName := resolveCommandName(args)
+	if commandName != "bugreport" {
+		runID := uuid.NewString()
+		attrs := rootSpanAttributes(commandName, runID, args)
+		spanContext = context.WithValue(spanContext, runIDContextKey, runID)
+		spanContext, rootSpan = startCommandSpanFn(spanContext, commandName, attrs)
+		traceID := rootSpan.SpanContext().TraceID().String()
+		spanID := rootSpan.SpanContext().SpanID().String()
+		rootSpan.SetAttributes(attribute.String("trace_id", traceID))
+		loggerOptions = append(
+			loggerOptions,
+			logging.WithRunID(runID),
+			logging.WithTraceID(traceID),
+			logging.WithSpanID(spanID),
+		)
+		defer rootSpan.End()
+	}
+
+	cfg, err := loadConfigFn(spanContext)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	logger, err := newRuntimeLoggerFn(ctx)
+	logger, err := newRuntimeLoggerFn(spanContext, loggerOptions...)
 	if err != nil {
 		return fmt.Errorf("initialize logging: %w", err)
 	}
@@ -108,20 +131,8 @@ func run(ctx context.Context, args []string) error {
 		}
 	}()
 
-	cmd := newRootCommandFn(ctx, cfg, logger.Logger)
+	cmd := newRootCommandFn(spanContext, cfg, logger.Logger)
 	cmd.SetArgs(args)
-
-	spanContext := ctx
-	var rootSpan commandSpan
-	commandName := resolveCommandName(args)
-	if commandName != "bugreport" {
-		runID := uuid.NewString()
-		attrs := rootSpanAttributes(commandName, runID, args)
-		spanContext = context.WithValue(spanContext, runIDContextKey, runID)
-		spanContext, rootSpan = startCommandSpanFn(spanContext, commandName, attrs)
-		rootSpan.SetAttributes(attribute.String("trace_id", rootSpan.SpanContext().TraceID().String()))
-		defer rootSpan.End()
-	}
 
 	if err := cmd.ExecuteContext(spanContext); err != nil {
 		if rootSpan != nil {

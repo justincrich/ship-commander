@@ -2,6 +2,7 @@ package logging
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,4 +38,112 @@ func TestNewCreatesJSONLogInHomeDirectory(t *testing.T) {
 	if !strings.Contains(string(content), "\"msg\":\"test-entry\"") {
 		t.Fatalf("log file does not contain JSON message entry: %s", string(content))
 	}
+}
+
+func TestNewIncludesRunTraceAndSpanFields(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	logger, err := New(
+		context.Background(),
+		WithRunID("run-123"),
+		WithTraceID("trace-abc"),
+		WithSpanID("span-def"),
+	)
+	if err != nil {
+		t.Fatalf("new logger: %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := logger.Close(); closeErr != nil {
+			t.Fatalf("close logger: %v", closeErr)
+		}
+	})
+
+	logger.Logger.Info("correlated-entry")
+
+	records := readLogRecords(t, logger.Path())
+	record := findRecordByMessage(t, records, "correlated-entry")
+
+	if got := asString(record["run_id"]); got != "run-123" {
+		t.Fatalf("run_id = %q, want %q", got, "run-123")
+	}
+	if got := asString(record["trace_id"]); got != "trace-abc" {
+		t.Fatalf("trace_id = %q, want %q", got, "trace-abc")
+	}
+	if got := asString(record["span_id"]); got != "span-def" {
+		t.Fatalf("span_id = %q, want %q", got, "span-def")
+	}
+}
+
+func TestWithCorrelationHelpersUpdateSubsequentRecords(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	logger, err := New(context.Background())
+	if err != nil {
+		t.Fatalf("new logger: %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := logger.Close(); closeErr != nil {
+			t.Fatalf("close logger: %v", closeErr)
+		}
+	})
+
+	logger.WithRunID("run-456").WithTraceID("trace-xyz").WithSpanID("span-uvw")
+	logger.Logger.Info("mutated-correlation-entry")
+
+	records := readLogRecords(t, logger.Path())
+	record := findRecordByMessage(t, records, "mutated-correlation-entry")
+
+	if got := asString(record["run_id"]); got != "run-456" {
+		t.Fatalf("run_id = %q, want %q", got, "run-456")
+	}
+	if got := asString(record["trace_id"]); got != "trace-xyz" {
+		t.Fatalf("trace_id = %q, want %q", got, "trace-xyz")
+	}
+	if got := asString(record["span_id"]); got != "span-uvw" {
+		t.Fatalf("span_id = %q, want %q", got, "span-uvw")
+	}
+}
+
+func readLogRecords(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	// #nosec G304 -- path comes from logger.Path() in test setup.
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	records := make([]map[string]any, 0, len(lines))
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		record := map[string]any{}
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("unmarshal log line %q: %v", line, err)
+		}
+		records = append(records, record)
+	}
+	return records
+}
+
+func findRecordByMessage(t *testing.T, records []map[string]any, message string) map[string]any {
+	t.Helper()
+	for _, record := range records {
+		if asString(record["msg"]) == message {
+			return record
+		}
+	}
+	t.Fatalf("record with msg %q not found", message)
+	return nil
+}
+
+func asString(value any) string {
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return text
 }

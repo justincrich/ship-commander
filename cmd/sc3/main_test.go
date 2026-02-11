@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -119,7 +122,7 @@ func TestRunInitializesTelemetryBeforeConfigLoad(t *testing.T) {
 		order = append(order, "config")
 		return &config.Config{}, nil
 	}
-	newRuntimeLoggerFn = func(context.Context) (*logging.RuntimeLogger, error) {
+	newRuntimeLoggerFn = func(context.Context, ...logging.Option) (*logging.RuntimeLogger, error) {
 		return &logging.RuntimeLogger{Logger: testLogger()}, nil
 	}
 	startCommandSpanFn = func(ctx context.Context, _ string, _ []attribute.KeyValue) (context.Context, commandSpan) {
@@ -143,7 +146,7 @@ func TestRunSetsRootSpanStatusOnSuccessAndFailure(t *testing.T) {
 
 	initTelemetryFn = func(context.Context) (func(), error) { return func() {}, nil }
 	loadConfigFn = func(context.Context) (*config.Config, error) { return &config.Config{}, nil }
-	newRuntimeLoggerFn = func(context.Context) (*logging.RuntimeLogger, error) {
+	newRuntimeLoggerFn = func(context.Context, ...logging.Option) (*logging.RuntimeLogger, error) {
 		return &logging.RuntimeLogger{Logger: testLogger()}, nil
 	}
 
@@ -184,7 +187,7 @@ func TestRunRootSpanAttributesContainRunIDAndRedactedArgs(t *testing.T) {
 
 	initTelemetryFn = func(context.Context) (func(), error) { return func() {}, nil }
 	loadConfigFn = func(context.Context) (*config.Config, error) { return &config.Config{}, nil }
-	newRuntimeLoggerFn = func(context.Context) (*logging.RuntimeLogger, error) {
+	newRuntimeLoggerFn = func(context.Context, ...logging.Option) (*logging.RuntimeLogger, error) {
 		return &logging.RuntimeLogger{Logger: testLogger()}, nil
 	}
 	newRootCommandFn = func(_ context.Context, _ *config.Config, _ *log.Logger) *cobra.Command {
@@ -239,6 +242,86 @@ func TestRunRootSpanAttributesContainRunIDAndRedactedArgs(t *testing.T) {
 	}
 	if _, ok := attrString(capturedAttrs, "git.branch"); !ok {
 		t.Fatal("git.branch attribute missing")
+	}
+}
+
+func TestRunWritesCorrelatedLogFieldsFromRootSpan(t *testing.T) {
+	restore := snapshotRunHooks()
+	defer restore()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	initTelemetryFn = func(context.Context) (func(), error) { return func() {}, nil }
+	loadConfigFn = func(context.Context) (*config.Config, error) { return &config.Config{}, nil }
+	newRuntimeLoggerFn = func(ctx context.Context, options ...logging.Option) (*logging.RuntimeLogger, error) {
+		return logging.New(ctx, options...)
+	}
+	newRootCommandFn = func(_ context.Context, _ *config.Config, logger *log.Logger) *cobra.Command {
+		return &cobra.Command{
+			Use:                "sc3",
+			DisableFlagParsing: true,
+			RunE: func(*cobra.Command, []string) error {
+				logger.Info("integration-correlation-entry")
+				return nil
+			},
+		}
+	}
+
+	var capturedAttrs []attribute.KeyValue
+	startCommandSpanFn = func(ctx context.Context, _ string, attrs []attribute.KeyValue) (context.Context, commandSpan) {
+		capturedAttrs = append([]attribute.KeyValue(nil), attrs...)
+		return ctx, newFakeCommandSpan()
+	}
+
+	if err := run(context.Background(), []string{"plan"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	runID, ok := attrString(capturedAttrs, "run_id")
+	if !ok || strings.TrimSpace(runID) == "" {
+		t.Fatalf("captured run_id missing: %q", runID)
+	}
+
+	logFiles, err := filepath.Glob(filepath.Join(home, ".sc3", "logs", "sc3-*.log"))
+	if err != nil {
+		t.Fatalf("glob log files: %v", err)
+	}
+	if len(logFiles) == 0 {
+		t.Fatal("expected at least one log file")
+	}
+
+	content, err := os.ReadFile(logFiles[0])
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+
+	var correlatedRecord map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(string(content)), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		record := map[string]any{}
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("unmarshal log line: %v", err)
+		}
+		if asStringAny(record["msg"]) == "integration-correlation-entry" {
+			correlatedRecord = record
+			break
+		}
+	}
+	if correlatedRecord == nil {
+		t.Fatal("did not find integration-correlation-entry record in log output")
+	}
+
+	if got := asStringAny(correlatedRecord["run_id"]); got != runID {
+		t.Fatalf("run_id = %q, want %q", got, runID)
+	}
+	if got := asStringAny(correlatedRecord["trace_id"]); got != newFakeCommandSpan().spanContext.TraceID().String() {
+		t.Fatalf("trace_id = %q, want %q", got, newFakeCommandSpan().spanContext.TraceID().String())
+	}
+	if got := asStringAny(correlatedRecord["span_id"]); got != newFakeCommandSpan().spanContext.SpanID().String() {
+		t.Fatalf("span_id = %q, want %q", got, newFakeCommandSpan().spanContext.SpanID().String())
 	}
 }
 
@@ -319,4 +402,12 @@ func attrStringSlice(attrs []attribute.KeyValue, key string) ([]string, bool) {
 		return attr.Value.AsStringSlice(), true
 	}
 	return nil, false
+}
+
+func asStringAny(value any) string {
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return text
 }
