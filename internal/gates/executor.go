@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
+
+	tooltrace "github.com/ship-commander/sc3/internal/tracing"
 )
 
 type commandExecutor interface {
@@ -45,31 +46,26 @@ func (shellExecutor) Run(
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, "sh", "-c", command)
-	cmd.Dir = workdir
-
 	output := newLimitedBuffer(outputLimitBytes)
-	cmd.Stdout = output
-	cmd.Stderr = output
 
 	start := time.Now()
-	err := cmd.Run()
+	exitCode, stdout, stderr, err := tooltrace.ExecuteTool(runCtx, "sh", []string{"-c", command}, workdir)
 	duration := time.Since(start)
 
-	exitCode := 0
+	output.WriteString(stdout)
+	if strings.TrimSpace(stdout) != "" && strings.TrimSpace(stderr) != "" {
+		output.WriteString("\n")
+	}
+	output.WriteString(stderr)
+
 	if err != nil {
 		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-			exitCode = -1
-			output.WriteString(fmt.Sprintf("\ncommand timed out after %s", timeout))
-		} else {
-			var exitErr *exec.ExitError
-			if errors.As(err, &exitErr) {
-				exitCode = exitErr.ExitCode()
-			} else if cmd.ProcessState != nil {
-				exitCode = cmd.ProcessState.ExitCode()
-			} else {
-				return commandResult{}, fmt.Errorf("run command %q: %w", command, err)
+			if exitCode == 0 {
+				exitCode = -1
 			}
+			output.WriteString(fmt.Sprintf("\ncommand timed out after %s", timeout))
+		} else if exitCode == 0 {
+			return commandResult{}, fmt.Errorf("run command %q: %w", command, err)
 		}
 	}
 

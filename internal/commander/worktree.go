@@ -1,13 +1,13 @@
 package commander
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	tooltrace "github.com/ship-commander/sc3/internal/tracing"
 )
 
 type shellRunner interface {
@@ -17,16 +17,8 @@ type shellRunner interface {
 type commandRunner struct{}
 
 func (commandRunner) Run(ctx context.Context, dir string, name string, args ...string) ([]byte, []byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir = dir
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	return stdout.Bytes(), stderr.Bytes(), err
+	_, stdout, stderr, err := tooltrace.ExecuteTool(ctx, name, args, dir)
+	return []byte(stdout), []byte(stderr), err
 }
 
 // GitWorktreeManager creates per-mission git worktrees with deterministic naming.
