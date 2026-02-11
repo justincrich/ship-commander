@@ -2,14 +2,18 @@ package commander
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/ship-commander/sc3/internal/admiral"
+	"github.com/ship-commander/sc3/internal/protocol"
 )
 
 const (
@@ -21,6 +25,10 @@ const (
 	MissionClassificationStandardOps = "STANDARD_OPS"
 	// DefaultMaxRevisions is the deterministic default revision ceiling before halting.
 	DefaultMaxRevisions = 3
+	// defaultReviewPollInterval determines how often commander polls protocol store for review verdicts.
+	defaultReviewPollInterval = 200 * time.Millisecond
+	// defaultReviewTimeout bounds reviewer verdict waiting for deterministic mission completion.
+	defaultReviewTimeout = 5 * time.Minute
 )
 
 var (
@@ -59,12 +67,15 @@ type Mission struct {
 	DependsOn                  []string
 	UseCaseIDs                 []string
 	SurfaceArea                []string
+	ReviewFeedback             string
 	RevisionCount              int
 	MaxRevisions               int
 	// ACAttemptsExhausted indicates all AC attempts failed and mission must halt deterministically.
 	ACAttemptsExhausted bool
 	// ManualHalt requests deterministic dispatch stop before running mission work.
 	ManualHalt bool
+	// AcceptanceCriteria are forwarded to reviewer context for independent validation.
+	AcceptanceCriteria []string
 }
 
 // Slug returns a URL-safe slug for branch naming.
@@ -91,6 +102,21 @@ type Event struct {
 type DispatchRequest struct {
 	Mission      Mission
 	WorktreePath string
+	// ReviewerFeedback is populated when a prior review returned NEEDS_FIXES.
+	ReviewerFeedback string
+}
+
+// ReviewerDispatchRequest contains reviewer context payload.
+type ReviewerDispatchRequest struct {
+	Mission                     Mission
+	WorktreePath                string
+	CodeDiff                    string
+	GateEvidence                []string
+	AcceptanceCriteria          []string
+	DemoTokenContent            string
+	ImplementerSessionID        string
+	ReadOnlyWorktree            bool
+	IncludeImplementerReasoning bool
 }
 
 // DispatchResult captures dispatch metadata from a harness implementation.
@@ -117,6 +143,7 @@ type SurfaceLocker interface {
 // Harness dispatches implementer sessions.
 type Harness interface {
 	DispatchImplementer(ctx context.Context, req DispatchRequest) (DispatchResult, error)
+	DispatchReviewer(ctx context.Context, req ReviewerDispatchRequest) (DispatchResult, error)
 }
 
 // Verifier verifies mission output independently from the implementer agent.
@@ -150,9 +177,23 @@ type EventPublisher interface {
 	Publish(ctx context.Context, event Event) error
 }
 
+// ProtocolEventStore provides mission-scoped protocol history used by reviewer flows.
+type ProtocolEventStore interface {
+	ListByMission(ctx context.Context, missionID string) ([]protocol.ProtocolEvent, error)
+}
+
+// ReviewVerdict captures reviewer decision and feedback.
+type ReviewVerdict struct {
+	Decision string
+	Feedback string
+}
+
 // CommanderConfig configures commander runtime behavior.
 type CommanderConfig struct {
-	WIPLimit int
+	WIPLimit           int
+	ProtocolEventStore ProtocolEventStore
+	ReviewPollInterval time.Duration
+	ReviewTimeout      time.Duration
 }
 
 // Commander orchestrates mission execution from approved manifest through verification.
@@ -167,7 +208,10 @@ type Commander struct {
 	feedback      FeedbackInjector
 	shelver       PlanShelver
 	events        EventPublisher
+	protocolStore ProtocolEventStore
 	wipLimit      int
+	reviewPoll    time.Duration
+	reviewTimeout time.Duration
 	now           func() time.Time
 }
 
@@ -230,7 +274,10 @@ func New(
 		feedback:      feedback,
 		shelver:       shelver,
 		events:        events,
+		protocolStore: cfg.ProtocolEventStore,
 		wipLimit:      cfg.WIPLimit,
+		reviewPoll:    pickDuration(cfg.ReviewPollInterval, defaultReviewPollInterval),
+		reviewTimeout: pickDuration(cfg.ReviewTimeout, defaultReviewTimeout),
 		now:           time.Now,
 	}, nil
 }
@@ -364,14 +411,67 @@ func (c *Commander) runMission(ctx context.Context, waveIndex int, mission Missi
 		_ = release()
 	}()
 
-	if _, err := c.harness.DispatchImplementer(ctx, DispatchRequest{
-		Mission:      mission,
-		WorktreePath: worktreePath,
-	}); err != nil {
-		_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, fmt.Sprintf("dispatch failed: %v", err))
-		return fmt.Errorf("dispatch implementer for %s: %w", mission.ID, err)
+	maxRevisions := mission.MaxRevisions
+	if maxRevisions <= 0 {
+		maxRevisions = DefaultMaxRevisions
 	}
+	currentMission := mission
 
+	for {
+		implementerResult, err := c.dispatchImplementer(ctx, currentMission, worktreePath, waveIndex)
+		if err != nil {
+			return err
+		}
+
+		if err := c.verifyMissionOutput(ctx, currentMission, worktreePath, waveIndex); err != nil {
+			return err
+		}
+
+		verdict, err := c.dispatchReviewerAndAwaitVerdict(
+			ctx,
+			currentMission,
+			worktreePath,
+			waveIndex,
+			implementerResult.SessionID,
+		)
+		if err != nil {
+			return err
+		}
+
+		done, err := c.handleReviewVerdict(ctx, mission.ID, waveIndex, &currentMission, maxRevisions, verdict)
+		if err != nil {
+			return err
+		}
+		if done {
+			return nil
+		}
+	}
+}
+
+func (c *Commander) dispatchImplementer(
+	ctx context.Context,
+	mission Mission,
+	worktreePath string,
+	waveIndex int,
+) (DispatchResult, error) {
+	result, err := c.harness.DispatchImplementer(ctx, DispatchRequest{
+		Mission:          mission,
+		WorktreePath:     worktreePath,
+		ReviewerFeedback: mission.ReviewFeedback,
+	})
+	if err != nil {
+		_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, fmt.Sprintf("dispatch failed: %v", err))
+		return DispatchResult{}, fmt.Errorf("dispatch implementer for %s: %w", mission.ID, err)
+	}
+	return result, nil
+}
+
+func (c *Commander) verifyMissionOutput(
+	ctx context.Context,
+	mission Mission,
+	worktreePath string,
+	waveIndex int,
+) error {
 	if isStandardOpsMission(mission) {
 		if err := c.verifier.VerifyImplement(ctx, mission, worktreePath); err != nil {
 			_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, fmt.Sprintf("verification failed: %v", err))
@@ -387,24 +487,321 @@ func (c *Commander) runMission(ctx context.Context, waveIndex int, mission Missi
 			)
 			return fmt.Errorf("validate demo token for %s: %w", mission.ID, err)
 		}
-	} else {
-		if err := c.verifier.Verify(ctx, mission, worktreePath); err != nil {
-			_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, fmt.Sprintf("verification failed: %v", err))
-			return fmt.Errorf("verify mission %s: %w", mission.ID, err)
+		return nil
+	}
+
+	if err := c.verifier.Verify(ctx, mission, worktreePath); err != nil {
+		_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, fmt.Sprintf("verification failed: %v", err))
+		return fmt.Errorf("verify mission %s: %w", mission.ID, err)
+	}
+	return nil
+}
+
+func (c *Commander) dispatchReviewerAndAwaitVerdict(
+	ctx context.Context,
+	mission Mission,
+	worktreePath string,
+	waveIndex int,
+	implementerSessionID string,
+) (ReviewVerdict, error) {
+	reviewerReq, err := c.buildReviewerDispatchRequest(ctx, mission, worktreePath, implementerSessionID)
+	if err != nil {
+		_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, fmt.Sprintf("build reviewer context failed: %v", err))
+		return ReviewVerdict{}, fmt.Errorf("build reviewer context for %s: %w", mission.ID, err)
+	}
+
+	reviewerResult, err := c.harness.DispatchReviewer(ctx, reviewerReq)
+	if err != nil {
+		_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, fmt.Sprintf("reviewer dispatch failed: %v", err))
+		return ReviewVerdict{}, fmt.Errorf("dispatch reviewer for %s: %w", mission.ID, err)
+	}
+
+	reviewerSession := strings.TrimSpace(reviewerResult.SessionID)
+	implementerSession := strings.TrimSpace(implementerSessionID)
+	if reviewerSession == "" {
+		_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, "reviewer dispatch returned empty session id")
+		return ReviewVerdict{}, fmt.Errorf("dispatch reviewer for %s: empty reviewer session id", mission.ID)
+	}
+	if implementerSession != "" && reviewerSession == implementerSession {
+		_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, "reviewer must be a different ensign session than implementer")
+		return ReviewVerdict{}, fmt.Errorf("dispatch reviewer for %s: reviewer and implementer session ids must differ", mission.ID)
+	}
+
+	verdict, err := c.awaitReviewVerdict(ctx, mission.ID, implementerSession, reviewerSession)
+	if err != nil {
+		_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, fmt.Sprintf("review verdict wait failed: %v", err))
+		return ReviewVerdict{}, fmt.Errorf("await review verdict for %s: %w", mission.ID, err)
+	}
+	return verdict, nil
+}
+
+func (c *Commander) handleReviewVerdict(
+	ctx context.Context,
+	missionID string,
+	waveIndex int,
+	mission *Mission,
+	maxRevisions int,
+	verdict ReviewVerdict,
+) (bool, error) {
+	switch verdict.Decision {
+	case protocol.ReviewVerdictApproved:
+		if err := c.publish(ctx, Event{
+			Type:      EventMissionCompleted,
+			MissionID: missionID,
+			WaveIndex: waveIndex,
+			Timestamp: c.now().UTC(),
+			Message:   "mission verified and reviewer approved",
+		}); err != nil {
+			return false, fmt.Errorf("publish completion event for %s: %w", missionID, err)
+		}
+		return true, nil
+	case protocol.ReviewVerdictNeedsFixes:
+		mission.RevisionCount++
+		mission.ReviewFeedback = strings.TrimSpace(verdict.Feedback)
+		if mission.RevisionCount >= maxRevisions {
+			message := fmt.Sprintf(
+				"review requested fixes and revision count %d reached max revisions %d",
+				mission.RevisionCount,
+				maxRevisions,
+			)
+			_ = c.publishHalt(ctx, waveIndex, missionID, HaltReasonMaxRevisionsExceeded, message)
+			return false, fmt.Errorf("mission %s halted after review: %s", missionID, message)
+		}
+		return false, nil
+	default:
+		_ = c.publishHalt(
+			ctx,
+			waveIndex,
+			missionID,
+			HaltReasonManualHalt,
+			fmt.Sprintf("unsupported reviewer verdict %q", verdict.Decision),
+		)
+		return false, fmt.Errorf("unsupported reviewer verdict %q for mission %s", verdict.Decision, missionID)
+	}
+}
+
+func (c *Commander) buildReviewerDispatchRequest(
+	ctx context.Context,
+	mission Mission,
+	worktreePath string,
+	implementerSessionID string,
+) (ReviewerDispatchRequest, error) {
+	diff, err := gitDiff(ctx, worktreePath)
+	if err != nil {
+		diff = fmt.Sprintf("diff unavailable: %v", err)
+	}
+
+	gateEvidence, err := c.collectGateEvidence(ctx, mission.ID)
+	if err != nil {
+		return ReviewerDispatchRequest{}, fmt.Errorf("collect gate evidence: %w", err)
+	}
+
+	demoToken, err := readDemoToken(worktreePath, mission.ID)
+	if err != nil {
+		demoToken = fmt.Sprintf("demo token unavailable: %v", err)
+	}
+
+	return ReviewerDispatchRequest{
+		Mission:                     mission,
+		WorktreePath:                worktreePath,
+		CodeDiff:                    diff,
+		GateEvidence:                gateEvidence,
+		AcceptanceCriteria:          append([]string(nil), mission.AcceptanceCriteria...),
+		DemoTokenContent:            demoToken,
+		ImplementerSessionID:        strings.TrimSpace(implementerSessionID),
+		ReadOnlyWorktree:            true,
+		IncludeImplementerReasoning: false,
+	}, nil
+}
+
+func (c *Commander) collectGateEvidence(ctx context.Context, missionID string) ([]string, error) {
+	if c.protocolStore == nil {
+		return []string{"gate evidence unavailable: protocol store not configured"}, nil
+	}
+
+	events, err := c.protocolStore.ListByMission(ctx, missionID)
+	if err != nil {
+		return nil, fmt.Errorf("list protocol events for mission %s: %w", missionID, err)
+	}
+
+	gateEvidence := make([]string, 0, len(events))
+	for _, event := range events {
+		if event.Type != protocol.EventTypeGateResult {
+			continue
+		}
+		payload := strings.TrimSpace(string(event.Payload))
+		if payload == "" {
+			payload = "{}"
+		}
+		gateEvidence = append(gateEvidence, fmt.Sprintf("%s %s", event.Timestamp.UTC().Format(time.RFC3339), payload))
+	}
+	if len(gateEvidence) == 0 {
+		return []string{"no gate evidence events recorded for mission"}, nil
+	}
+
+	return gateEvidence, nil
+}
+
+func (c *Commander) awaitReviewVerdict(
+	ctx context.Context,
+	missionID string,
+	implementerSessionID string,
+	reviewerSessionID string,
+) (ReviewVerdict, error) {
+	if c.protocolStore == nil {
+		return ReviewVerdict{Decision: protocol.ReviewVerdictApproved}, nil
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, c.reviewTimeout)
+	defer cancel()
+
+	for {
+		verdict, found, err := c.findReviewVerdict(waitCtx, missionID, implementerSessionID, reviewerSessionID)
+		if err != nil {
+			return ReviewVerdict{}, err
+		}
+		if found {
+			return verdict, nil
+		}
+
+		select {
+		case <-waitCtx.Done():
+			return ReviewVerdict{}, fmt.Errorf(
+				"timed out waiting for review verdict event %q for mission %s",
+				protocol.EventTypeReviewComplete,
+				missionID,
+			)
+		case <-time.After(c.reviewPoll):
 		}
 	}
+}
 
-	if err := c.publish(ctx, Event{
-		Type:      EventMissionCompleted,
-		MissionID: mission.ID,
-		WaveIndex: waveIndex,
-		Timestamp: c.now().UTC(),
-		Message:   "mission verified successfully",
-	}); err != nil {
-		return fmt.Errorf("publish completion event for %s: %w", mission.ID, err)
+func (c *Commander) findReviewVerdict(
+	ctx context.Context,
+	missionID string,
+	implementerSessionID string,
+	reviewerSessionID string,
+) (ReviewVerdict, bool, error) {
+	events, err := c.protocolStore.ListByMission(ctx, missionID)
+	if err != nil {
+		return ReviewVerdict{}, false, fmt.Errorf("list protocol events for mission %s: %w", missionID, err)
 	}
 
-	return nil
+	for i := len(events) - 1; i >= 0; i-- {
+		verdict, verdictImplementerSessionID, verdictReviewerSessionID, ok := parseReviewVerdict(events[i])
+		if !ok {
+			continue
+		}
+		if implementerSessionID != "" && verdictImplementerSessionID != "" && verdictImplementerSessionID != implementerSessionID {
+			continue
+		}
+		if reviewerSessionID != "" && verdictReviewerSessionID != "" && verdictReviewerSessionID != reviewerSessionID {
+			continue
+		}
+		return ReviewVerdict{
+			Decision: verdict,
+			Feedback: firstNonEmptyString(
+				extractJSONString(events[i].Payload, "feedback"),
+				extractJSONString(events[i].Payload, "feedback_text"),
+				extractJSONString(events[i].Payload, "feedbackText"),
+			),
+		}, true, nil
+	}
+	return ReviewVerdict{}, false, nil
+}
+
+func parseReviewVerdict(event protocol.ProtocolEvent) (string, string, string, bool) {
+	if event.Type != protocol.EventTypeReviewComplete {
+		return "", "", "", false
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return "", "", "", false
+	}
+
+	verdict := strings.ToUpper(strings.TrimSpace(firstNonEmptyMap(payload, "verdict", "decision")))
+	if verdict != protocol.ReviewVerdictApproved && verdict != protocol.ReviewVerdictNeedsFixes {
+		return "", "", "", false
+	}
+
+	return verdict,
+		strings.TrimSpace(firstNonEmptyMap(payload, "implementer_session_id", "implementerSessionID", "implementer_session")),
+		strings.TrimSpace(firstNonEmptyMap(payload, "reviewer_session_id", "reviewerSessionID", "reviewer_session")),
+		true
+}
+
+func firstNonEmptyMap(values map[string]any, keys ...string) string {
+	for _, key := range keys {
+		raw, ok := values[key]
+		if !ok {
+			continue
+		}
+		value, ok := raw.(string)
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func extractJSONString(raw json.RawMessage, keys ...string) string {
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	return firstNonEmptyMap(payload, keys...)
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func gitDiff(ctx context.Context, worktreePath string) (string, error) {
+	out, err := exec.CommandContext(ctx, "git", "-C", worktreePath, "diff", "--").CombinedOutput()
+	if err != nil {
+		trimmed := strings.TrimSpace(string(out))
+		if trimmed == "" {
+			return "", fmt.Errorf("git diff: %w", err)
+		}
+		return "", fmt.Errorf("git diff: %w (%s)", err, trimmed)
+	}
+	return string(out), nil
+}
+
+func readDemoToken(worktreePath string, missionID string) (string, error) {
+	root := filepath.Clean(worktreePath)
+	if root == "." || root == "" {
+		return "", errors.New("worktree path must not be empty")
+	}
+	tokenPath := filepath.Clean(filepath.Join(root, "demo", fmt.Sprintf("MISSION-%s.md", missionID)))
+	rootWithSep := root + string(os.PathSeparator)
+	if tokenPath != root && !strings.HasPrefix(tokenPath, rootWithSep) {
+		return "", fmt.Errorf("demo token path escapes worktree root: %s", tokenPath)
+	}
+	// #nosec G304 -- tokenPath is constrained to worktree root and deterministic mission filename.
+	content, err := os.ReadFile(tokenPath)
+	if err != nil {
+		return "", fmt.Errorf("read demo token %s: %w", tokenPath, err)
+	}
+	return string(content), nil
+}
+
+func pickDuration(value time.Duration, fallback time.Duration) time.Duration {
+	if value > 0 {
+		return value
+	}
+	return fallback
 }
 
 func (c *Commander) publishHalt(

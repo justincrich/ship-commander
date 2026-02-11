@@ -21,6 +21,8 @@ const (
 	EventTypeGateResult = "GATE_RESULT"
 	// EventTypeStateTransition represents orchestrator state transitions.
 	EventTypeStateTransition = "STATE_TRANSITION"
+	// EventTypeReviewComplete represents reviewer verdict completion for a mission.
+	EventTypeReviewComplete = "REVIEW_COMPLETE"
 )
 
 const (
@@ -32,6 +34,10 @@ const (
 	ClaimTypeREFACTORComplete = "REFACTOR_COMPLETE"
 	// ClaimTypeIMPLEMENTComplete indicates IMPLEMENT phase completion claim.
 	ClaimTypeIMPLEMENTComplete = "IMPLEMENT_COMPLETE"
+	// ReviewVerdictApproved indicates reviewer accepted mission output.
+	ReviewVerdictApproved = "APPROVED"
+	// ReviewVerdictNeedsFixes indicates reviewer requested implementer changes.
+	ReviewVerdictNeedsFixes = "NEEDS_FIXES"
 )
 
 const (
@@ -271,12 +277,21 @@ func validateEvent(event ProtocolEvent) error {
 			return fmt.Errorf("unsupported claim type %q", claimType)
 		}
 	}
+	if event.Type == EventTypeReviewComplete {
+		verdict, ok := extractReviewVerdict(event.Payload)
+		if !ok {
+			return errors.New("review complete payload missing verdict")
+		}
+		if !isSupportedReviewVerdict(verdict) {
+			return fmt.Errorf("unsupported review verdict %q", verdict)
+		}
+	}
 	return nil
 }
 
 func isSupportedType(value string) bool {
 	switch value {
-	case EventTypeAgentClaim, EventTypeGateResult, EventTypeStateTransition:
+	case EventTypeAgentClaim, EventTypeGateResult, EventTypeStateTransition, EventTypeReviewComplete:
 		return true
 	default:
 		return false
@@ -309,6 +324,39 @@ func matchesClaim(event ProtocolEvent, acID string, claimType string) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(gotClaimType), strings.TrimSpace(claimType))
+}
+
+func extractReviewVerdict(payload json.RawMessage) (string, bool) {
+	var envelope map[string]any
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		return "", false
+	}
+
+	for _, key := range []string{"verdict", "decision"} {
+		raw, ok := envelope[key]
+		if !ok {
+			continue
+		}
+		value, ok := raw.(string)
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		return strings.ToUpper(value), true
+	}
+	return "", false
+}
+
+func isSupportedReviewVerdict(value string) bool {
+	switch strings.TrimSpace(strings.ToUpper(value)) {
+	case ReviewVerdictApproved, ReviewVerdictNeedsFixes:
+		return true
+	default:
+		return false
+	}
 }
 
 func extractClaimType(payload json.RawMessage) (string, bool) {

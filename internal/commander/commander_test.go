@@ -2,7 +2,9 @@ package commander
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ship-commander/sc3/internal/admiral"
+	"github.com/ship-commander/sc3/internal/protocol"
 )
 
 func TestComputeWaves(t *testing.T) {
@@ -143,7 +146,7 @@ func TestCommanderExecuteSingleMissionFlow(t *testing.T) {
 	if len(worktrees.created) != 1 || worktrees.created[0] != "m1" {
 		t.Fatalf("worktrees created = %v, want [m1]", worktrees.created)
 	}
-	if !reflect.DeepEqual(sequence, []string{"lock:m1", "dispatch:m1"}) {
+	if !reflect.DeepEqual(sequence, []string{"lock:m1", "dispatch:m1", "review:m1"}) {
 		t.Fatalf("call sequence = %v, want lock before dispatch", sequence)
 	}
 	if len(events.events) != 1 || events.events[0].Type != EventMissionCompleted {
@@ -462,11 +465,239 @@ func TestCommanderExecuteUsesDependencyOrderAcrossWaves(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 
-	if len(sequence) != 2 {
-		t.Fatalf("dispatch sequence = %v, want two dispatches", sequence)
+	if len(sequence) != 4 {
+		t.Fatalf("dispatch sequence = %v, want dispatch/review for two missions", sequence)
 	}
-	if sequence[0] != "dispatch:m1" || sequence[1] != "dispatch:m2" {
-		t.Fatalf("dispatch sequence = %v, want [dispatch:m1 dispatch:m2]", sequence)
+	if sequence[0] != "dispatch:m1" || sequence[1] != "review:m1" || sequence[2] != "dispatch:m2" || sequence[3] != "review:m2" {
+		t.Fatalf(
+			"dispatch sequence = %v, want [dispatch:m1 review:m1 dispatch:m2 review:m2]",
+			sequence,
+		)
+	}
+}
+
+func TestCommanderExecuteDispatchesReviewerWithContextAndWaitsForVerdict(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeManifestStore{
+		manifest: []Mission{{
+			ID:                 "m1",
+			Title:              "Mission One",
+			AcceptanceCriteria: []string{"AC-1", "AC-2"},
+		}},
+		ready: [][]string{{"m1"}},
+	}
+	worktrees := &fakeWorktreeManager{paths: map[string]string{"m1": "/tmp/worktree/m1"}}
+	locks := &fakeSurfaceLocker{}
+	harness := &fakeHarness{
+		implementerSessionIDs: []string{"impl-1"},
+		reviewerSessionIDs:    []string{"rev-1"},
+	}
+	verifier := &fakeVerifier{}
+	demoTokens := &fakeDemoTokenValidator{}
+	events := &fakeEventPublisher{}
+	protocolStore := &fakeProtocolEventStore{
+		responses: [][]protocol.ProtocolEvent{
+			{{
+				Type:      protocol.EventTypeGateResult,
+				MissionID: "m1",
+				Payload:   json.RawMessage(`{"gate":"go test ./...","result":"pass"}`),
+				Timestamp: time.Date(2026, 2, 11, 12, 0, 0, 0, time.UTC),
+			}},
+			{},
+			{reviewCompleteEvent("m1", "APPROVED", "impl-1", "rev-1", "looks good")},
+		},
+	}
+
+	cmd, err := newCommanderForTest(
+		store,
+		worktrees,
+		locks,
+		harness,
+		verifier,
+		demoTokens,
+		events,
+		CommanderConfig{
+			WIPLimit:           1,
+			ProtocolEventStore: protocolStore,
+			ReviewPollInterval: 1 * time.Millisecond,
+			ReviewTimeout:      200 * time.Millisecond,
+		},
+	)
+	if err != nil {
+		t.Fatalf("new commander: %v", err)
+	}
+
+	if err := cmd.Execute(context.Background(), "commission-1"); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if len(harness.reviewerDispatches) != 1 {
+		t.Fatalf("reviewer dispatch count = %d, want 1", len(harness.reviewerDispatches))
+	}
+	reviewerReq := harness.reviewerDispatches[0]
+	if reviewerReq.ImplementerSessionID != "impl-1" {
+		t.Fatalf("reviewer implementer session = %q, want impl-1", reviewerReq.ImplementerSessionID)
+	}
+	if !reviewerReq.ReadOnlyWorktree {
+		t.Fatal("reviewer request should enforce read-only worktree")
+	}
+	if reviewerReq.IncludeImplementerReasoning {
+		t.Fatal("reviewer request should not include implementer reasoning")
+	}
+	if !reflect.DeepEqual(reviewerReq.AcceptanceCriteria, []string{"AC-1", "AC-2"}) {
+		t.Fatalf("acceptance criteria = %v, want [AC-1 AC-2]", reviewerReq.AcceptanceCriteria)
+	}
+	if len(reviewerReq.GateEvidence) != 1 {
+		t.Fatalf("gate evidence count = %d, want 1", len(reviewerReq.GateEvidence))
+	}
+	if protocolStore.calls < 3 {
+		t.Fatalf("protocol store calls = %d, want at least 3 to prove polling", protocolStore.calls)
+	}
+	if len(events.events) != 1 || events.events[0].Type != EventMissionCompleted {
+		t.Fatalf("events = %v, want one %s", events.events, EventMissionCompleted)
+	}
+}
+
+func TestCommanderExecuteNeedsFixesRedispatchesImplementerWithFeedback(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeManifestStore{
+		manifest: []Mission{{ID: "m1", Title: "Mission One", MaxRevisions: 3}},
+		ready:    [][]string{{"m1"}},
+	}
+	worktrees := &fakeWorktreeManager{paths: map[string]string{"m1": "/tmp/worktree/m1"}}
+	locks := &fakeSurfaceLocker{}
+	harness := &fakeHarness{
+		implementerSessionIDs: []string{"impl-1", "impl-2"},
+		reviewerSessionIDs:    []string{"rev-1", "rev-2"},
+	}
+	verifier := &fakeVerifier{}
+	demoTokens := &fakeDemoTokenValidator{}
+	events := &fakeEventPublisher{}
+	protocolStore := &fakeProtocolEventStore{
+		responses: [][]protocol.ProtocolEvent{
+			{},
+			{reviewCompleteEvent("m1", "NEEDS_FIXES", "impl-1", "rev-1", "add edge-case guard")},
+			{},
+			{reviewCompleteEvent("m1", "APPROVED", "impl-2", "rev-2", "resolved")},
+		},
+	}
+
+	cmd, err := newCommanderForTest(
+		store,
+		worktrees,
+		locks,
+		harness,
+		verifier,
+		demoTokens,
+		events,
+		CommanderConfig{
+			WIPLimit:           1,
+			ProtocolEventStore: protocolStore,
+			ReviewPollInterval: 1 * time.Millisecond,
+			ReviewTimeout:      300 * time.Millisecond,
+		},
+	)
+	if err != nil {
+		t.Fatalf("new commander: %v", err)
+	}
+
+	if err := cmd.Execute(context.Background(), "commission-1"); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if len(harness.implementerDispatches) != 2 {
+		t.Fatalf("implementer dispatches = %d, want 2", len(harness.implementerDispatches))
+	}
+	if harness.implementerDispatches[1].ReviewerFeedback != "add edge-case guard" {
+		t.Fatalf("second dispatch feedback = %q, want propagated reviewer feedback", harness.implementerDispatches[1].ReviewerFeedback)
+	}
+	if len(events.events) != 1 || events.events[0].Type != EventMissionCompleted {
+		t.Fatalf("events = %v, want one %s", events.events, EventMissionCompleted)
+	}
+}
+
+func TestCommanderExecuteNeedsFixesHaltsWhenMaxRevisionsReached(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeManifestStore{
+		manifest: []Mission{{ID: "m1", Title: "Mission One", RevisionCount: 2, MaxRevisions: 3}},
+		ready:    [][]string{{"m1"}},
+	}
+	worktrees := &fakeWorktreeManager{paths: map[string]string{"m1": "/tmp/worktree/m1"}}
+	locks := &fakeSurfaceLocker{}
+	harness := &fakeHarness{
+		implementerSessionIDs: []string{"impl-1"},
+		reviewerSessionIDs:    []string{"rev-1"},
+	}
+	verifier := &fakeVerifier{}
+	demoTokens := &fakeDemoTokenValidator{}
+	events := &fakeEventPublisher{}
+	protocolStore := &fakeProtocolEventStore{
+		responses: [][]protocol.ProtocolEvent{
+			{},
+			{reviewCompleteEvent("m1", "NEEDS_FIXES", "impl-1", "rev-1", "still broken")},
+		},
+	}
+
+	cmd, err := newCommanderForTest(
+		store,
+		worktrees,
+		locks,
+		harness,
+		verifier,
+		demoTokens,
+		events,
+		CommanderConfig{
+			WIPLimit:           1,
+			ProtocolEventStore: protocolStore,
+			ReviewPollInterval: 1 * time.Millisecond,
+			ReviewTimeout:      300 * time.Millisecond,
+		},
+	)
+	if err != nil {
+		t.Fatalf("new commander: %v", err)
+	}
+
+	if err := cmd.Execute(context.Background(), "commission-1"); err == nil {
+		t.Fatal("expected execute error when max revisions reached")
+	}
+	if len(events.events) == 0 || events.events[0].Type != EventMissionHalted {
+		t.Fatalf("events = %v, want first event %s", events.events, EventMissionHalted)
+	}
+	if events.events[0].Reason != HaltReasonMaxRevisionsExceeded {
+		t.Fatalf("halt reason = %s, want %s", events.events[0].Reason, HaltReasonMaxRevisionsExceeded)
+	}
+}
+
+func TestCommanderExecuteReviewerMustDifferFromImplementer(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeManifestStore{
+		manifest: []Mission{{ID: "m1", Title: "Mission One"}},
+		ready:    [][]string{{"m1"}},
+	}
+	worktrees := &fakeWorktreeManager{paths: map[string]string{"m1": "/tmp/worktree/m1"}}
+	locks := &fakeSurfaceLocker{}
+	harness := &fakeHarness{
+		implementerSessionIDs: []string{"shared-session"},
+		reviewerSessionIDs:    []string{"shared-session"},
+	}
+	verifier := &fakeVerifier{}
+	demoTokens := &fakeDemoTokenValidator{}
+	events := &fakeEventPublisher{}
+
+	cmd, err := newCommanderForTest(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
+	if err != nil {
+		t.Fatalf("new commander: %v", err)
+	}
+
+	if err := cmd.Execute(context.Background(), "commission-1"); err == nil {
+		t.Fatal("expected execute error for same-session reviewer/implementer")
+	}
+	if len(events.events) == 0 || events.events[0].Type != EventMissionHalted {
+		t.Fatalf("events = %v, want first event %s", events.events, EventMissionHalted)
 	}
 }
 
@@ -773,7 +1004,15 @@ type fakeHarness struct {
 	delay         time.Duration
 	current       int
 	maxConcurrent int
-	mu            sync.Mutex
+	dispatchErr   error
+	reviewErr     error
+
+	implementerSessionIDs []string
+	reviewerSessionIDs    []string
+	implementerDispatches []DispatchRequest
+	reviewerDispatches    []ReviewerDispatchRequest
+
+	mu sync.Mutex
 }
 
 func (f *fakeHarness) DispatchImplementer(_ context.Context, req DispatchRequest) (DispatchResult, error) {
@@ -785,6 +1024,17 @@ func (f *fakeHarness) DispatchImplementer(_ context.Context, req DispatchRequest
 	if f.current > f.maxConcurrent {
 		f.maxConcurrent = f.current
 	}
+	f.implementerDispatches = append(f.implementerDispatches, req)
+	if f.dispatchErr != nil {
+		f.current--
+		f.mu.Unlock()
+		return DispatchResult{}, f.dispatchErr
+	}
+	sessionID := "session-" + req.Mission.ID
+	if len(f.implementerSessionIDs) > 0 {
+		sessionID = f.implementerSessionIDs[0]
+		f.implementerSessionIDs = f.implementerSessionIDs[1:]
+	}
 	f.mu.Unlock()
 
 	if f.delay > 0 {
@@ -795,7 +1045,26 @@ func (f *fakeHarness) DispatchImplementer(_ context.Context, req DispatchRequest
 	f.current--
 	f.mu.Unlock()
 
-	return DispatchResult{SessionID: "session-" + req.Mission.ID}, nil
+	return DispatchResult{SessionID: sessionID}, nil
+}
+
+func (f *fakeHarness) DispatchReviewer(_ context.Context, req ReviewerDispatchRequest) (DispatchResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.sequence != nil {
+		*f.sequence = append(*f.sequence, "review:"+req.Mission.ID)
+	}
+	f.reviewerDispatches = append(f.reviewerDispatches, req)
+	if f.reviewErr != nil {
+		return DispatchResult{}, f.reviewErr
+	}
+	sessionID := "review-session-" + req.Mission.ID
+	if len(f.reviewerSessionIDs) > 0 {
+		sessionID = f.reviewerSessionIDs[0]
+		f.reviewerSessionIDs = f.reviewerSessionIDs[1:]
+	}
+	return DispatchResult{SessionID: sessionID}, nil
 }
 
 type fakeVerifier struct {
@@ -933,6 +1202,57 @@ type fakeShellRunner struct {
 	dir  string
 	name string
 	args []string
+}
+
+type fakeProtocolEventStore struct {
+	responses [][]protocol.ProtocolEvent
+	calls     int
+	listErr   error
+	mu        sync.Mutex
+}
+
+func (f *fakeProtocolEventStore) ListByMission(_ context.Context, _ string) ([]protocol.ProtocolEvent, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	f.calls++
+	if len(f.responses) == 0 {
+		return nil, nil
+	}
+	index := f.calls - 1
+	if index >= len(f.responses) {
+		index = len(f.responses) - 1
+	}
+	events := f.responses[index]
+	out := make([]protocol.ProtocolEvent, len(events))
+	copy(out, events)
+	return out, nil
+}
+
+func reviewCompleteEvent(
+	missionID string,
+	verdict string,
+	implementerSessionID string,
+	reviewerSessionID string,
+	feedback string,
+) protocol.ProtocolEvent {
+	return protocol.ProtocolEvent{
+		Type:      protocol.EventTypeReviewComplete,
+		MissionID: missionID,
+		Payload: json.RawMessage(
+			fmt.Sprintf(
+				`{"verdict":"%s","implementer_session_id":"%s","reviewer_session_id":"%s","feedback":"%s"}`,
+				verdict,
+				implementerSessionID,
+				reviewerSessionID,
+				feedback,
+			),
+		),
+		Timestamp: time.Now().UTC(),
+	}
 }
 
 func (f *fakeShellRunner) Run(_ context.Context, dir string, name string, args ...string) ([]byte, []byte, error) {

@@ -90,6 +90,49 @@ func TestPublishRejectsInvalidSchema(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected unsupported claim type error")
 	}
+
+	_, err = service.Publish(context.Background(), ProtocolEvent{
+		Type:      EventTypeReviewComplete,
+		MissionID: "mission-1",
+		Payload:   json.RawMessage(`{"verdict":"ESCALATE"}`),
+	})
+	if err == nil {
+		t.Fatal("expected unsupported review verdict error")
+	}
+	if !strings.Contains(err.Error(), "unsupported review verdict") {
+		t.Fatalf("error = %v, want unsupported review verdict", err)
+	}
+}
+
+func TestPublishAcceptsReviewCompleteEvent(t *testing.T) {
+	t.Parallel()
+
+	store := NewInMemoryStore()
+	bus := &fakeBus{}
+	service, err := NewService(store, bus, 10*time.Millisecond)
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	_, err = service.Publish(context.Background(), ProtocolEvent{
+		Type:      EventTypeReviewComplete,
+		MissionID: "mission-review",
+		Payload:   json.RawMessage(`{"verdict":"APPROVED","feedback":"looks good"}`),
+	})
+	if err != nil {
+		t.Fatalf("publish review complete event: %v", err)
+	}
+
+	events, err := store.ListByMission(context.Background(), "mission-review")
+	if err != nil {
+		t.Fatalf("list mission events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events count = %d, want 1", len(events))
+	}
+	if events[0].Type != EventTypeReviewComplete {
+		t.Fatalf("event type = %q, want %q", events[0].Type, EventTypeReviewComplete)
+	}
 }
 
 func TestWaitForClaimFindsPersistedClaim(t *testing.T) {
