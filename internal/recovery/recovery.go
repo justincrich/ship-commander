@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/ship-commander/sc3/internal/events"
 )
 
 const (
@@ -82,15 +84,22 @@ type SessionManager interface {
 	CleanupDeadSession(ctx context.Context, sessionID string) error
 }
 
+// EventBus publishes recovery audit events.
+type EventBus interface {
+	Publish(event events.Event)
+}
+
 // Config configures startup recovery behavior.
 type Config struct {
 	ResumeTimeout time.Duration
+	EventBus      EventBus
 }
 
 // Manager reconstructs persisted state and repairs orphaned execution state.
 type Manager struct {
 	store         StateStore
 	sessions      SessionManager
+	bus           EventBus
 	resumeTimeout time.Duration
 	now           func() time.Time
 }
@@ -109,6 +118,7 @@ func NewManager(store StateStore, sessions SessionManager, cfg Config) (*Manager
 	return &Manager{
 		store:         store,
 		sessions:      sessions,
+		bus:           cfg.EventBus,
 		resumeTimeout: cfg.ResumeTimeout,
 		now:           time.Now,
 	}, nil
@@ -120,6 +130,7 @@ func (m *Manager) Recover(ctx context.Context) (Result, error) {
 		return Result{}, errors.New("recovery manager is nil")
 	}
 	started := m.now()
+	auditTimestamp := started.UTC()
 
 	snapshot, err := m.store.LoadSnapshot(ctx)
 	if err != nil {
@@ -134,13 +145,26 @@ func (m *Manager) Recover(ctx context.Context) (Result, error) {
 
 	result := Result{Snapshot: snapshot}
 	markedDeadAgents := map[string]struct{}{}
-	orphanedMissions, err := m.recoverOrphanedMissions(ctx, snapshot.Missions, agentByID, activeSessions, markedDeadAgents)
+	orphanedMissions, err := m.recoverOrphanedMissions(
+		ctx,
+		snapshot.Missions,
+		agentByID,
+		activeSessions,
+		markedDeadAgents,
+		auditTimestamp,
+	)
 	if err != nil {
 		return Result{}, err
 	}
 	result.OrphanedMissionIDs = orphanedMissions
 
-	cleanedSessions, err := m.cleanupDeadSessions(ctx, snapshot.Agents, activeSessions, markedDeadAgents)
+	cleanedSessions, err := m.cleanupDeadSessions(
+		ctx,
+		snapshot.Agents,
+		activeSessions,
+		markedDeadAgents,
+		auditTimestamp,
+	)
 	if err != nil {
 		return Result{}, err
 	}
@@ -151,6 +175,7 @@ func (m *Manager) Recover(ctx context.Context) (Result, error) {
 	if err := validateRecoveryDuration(result.RecoveryDuration, m.resumeTimeout); err != nil {
 		return Result{}, err
 	}
+	m.publishRecoverySummary(result, auditTimestamp)
 
 	return result, nil
 }
@@ -172,6 +197,7 @@ func (m *Manager) recoverOrphanedMissions(
 	agentByID map[string]Agent,
 	activeSessions map[string]struct{},
 	markedDeadAgents map[string]struct{},
+	auditTimestamp time.Time,
 ) ([]string, error) {
 	orphanedMissionIDs := make([]string, 0)
 	for _, mission := range missions {
@@ -187,12 +213,34 @@ func (m *Manager) recoverOrphanedMissions(
 			return nil, fmt.Errorf("set orphaned mission %s to backlog: %w", mission.ID, err)
 		}
 		orphanedMissionIDs = append(orphanedMissionIDs, mission.ID)
+		m.publishAuditEvent(events.Event{
+			Type:       events.EventTypeStateTransition,
+			Timestamp:  auditTimestamp,
+			EntityType: "mission",
+			EntityID:   mission.ID,
+			Payload: map[string]string{
+				"from": MissionInProgress,
+				"to":   MissionBacklog,
+			},
+			Severity: events.SeverityWarn,
+		})
 
 		if hasAgent && isActiveAgentState(agent.State) {
 			if err := m.store.SetAgentDead(ctx, agent.ID); err != nil {
 				return nil, fmt.Errorf("mark orphaned agent %s dead: %w", agent.ID, err)
 			}
 			markedDeadAgents[agent.ID] = struct{}{}
+			m.publishAuditEvent(events.Event{
+				Type:       events.EventTypeStateTransition,
+				Timestamp:  auditTimestamp,
+				EntityType: "agent",
+				EntityID:   agent.ID,
+				Payload: map[string]string{
+					"from": strings.ToLower(strings.TrimSpace(agent.State)),
+					"to":   AgentDead,
+				},
+				Severity: events.SeverityWarn,
+			})
 		}
 	}
 	return orphanedMissionIDs, nil
@@ -203,6 +251,7 @@ func (m *Manager) cleanupDeadSessions(
 	agents []Agent,
 	activeSessions map[string]struct{},
 	markedDeadAgents map[string]struct{},
+	auditTimestamp time.Time,
 ) ([]string, error) {
 	cleanedSessionIDs := make([]string, 0)
 	alreadyCleaned := map[string]struct{}{}
@@ -230,9 +279,30 @@ func (m *Manager) cleanupDeadSessions(
 				return nil, fmt.Errorf("mark dead agent %s: %w", agent.ID, err)
 			}
 			markedDeadAgents[agent.ID] = struct{}{}
+			m.publishAuditEvent(events.Event{
+				Type:       events.EventTypeStateTransition,
+				Timestamp:  auditTimestamp,
+				EntityType: "agent",
+				EntityID:   agent.ID,
+				Payload: map[string]string{
+					"from": strings.ToLower(strings.TrimSpace(agent.State)),
+					"to":   AgentDead,
+				},
+				Severity: events.SeverityWarn,
+			})
 		}
 		cleanedSessionIDs = append(cleanedSessionIDs, sessionID)
 		alreadyCleaned[sessionID] = struct{}{}
+		m.publishAuditEvent(events.Event{
+			Type:       events.EventTypeHealthCheck,
+			Timestamp:  auditTimestamp,
+			EntityType: "session",
+			EntityID:   sessionID,
+			Payload: map[string]string{
+				"action": "cleanup_dead_session",
+			},
+			Severity: events.SeverityInfo,
+		})
 	}
 
 	return cleanedSessionIDs, nil
@@ -279,4 +349,30 @@ func hasLiveAgentSession(agent Agent, activeSessions map[string]struct{}) bool {
 func isActiveAgentState(state string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(state))
 	return normalized == AgentRunning || normalized == AgentSpawning
+}
+
+func (m *Manager) publishRecoverySummary(result Result, auditTimestamp time.Time) {
+	if m == nil || m.bus == nil {
+		return
+	}
+	m.bus.Publish(events.Event{
+		Type:       events.EventTypeHealthCheck,
+		Timestamp:  auditTimestamp,
+		EntityType: "recovery",
+		EntityID:   "startup",
+		Payload: map[string]any{
+			"orphaned_mission_ids":   append([]string(nil), result.OrphanedMissionIDs...),
+			"cleaned_dead_sessions":  append([]string(nil), result.CleanedDeadSessions...),
+			"resume_commission_ids":  append([]string(nil), result.ResumeCommissionIDs...),
+			"recovery_duration_msec": result.RecoveryDuration.Milliseconds(),
+		},
+		Severity: events.SeverityInfo,
+	})
+}
+
+func (m *Manager) publishAuditEvent(event events.Event) {
+	if m == nil || m.bus == nil {
+		return
+	}
+	m.bus.Publish(event)
 }

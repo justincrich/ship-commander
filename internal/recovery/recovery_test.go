@@ -5,8 +5,11 @@ import (
 	"errors"
 	"reflect"
 	"sort"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/ship-commander/sc3/internal/events"
 )
 
 type fakeStateStore struct {
@@ -65,6 +68,35 @@ func (f *fakeSessionManager) CleanupDeadSession(_ context.Context, sessionID str
 	}
 	f.cleaned = append(f.cleaned, sessionID)
 	return nil
+}
+
+type fakeBus struct {
+	mu     sync.Mutex
+	events []events.Event
+}
+
+func (f *fakeBus) Publish(event events.Event) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, event)
+}
+
+func (f *fakeBus) Count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.events)
+}
+
+func (f *fakeBus) CountByType(eventType string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	count := 0
+	for _, event := range f.events {
+		if event.Type == eventType {
+			count++
+		}
+	}
+	return count
 }
 
 func TestRecoverRepairsOrphansCleansDeadSessionsAndReturnsResumeCommissions(t *testing.T) {
@@ -196,4 +228,44 @@ func TestRecoverWrapsStoreAndSessionErrors(t *testing.T) {
 			t.Fatal("expected active sessions error")
 		}
 	})
+}
+
+func TestRecoverPublishesAuditEventsWhenBusConfigured(t *testing.T) {
+	t.Parallel()
+
+	bus := &fakeBus{}
+	store := &fakeStateStore{
+		snapshot: Snapshot{
+			Commissions: []Commission{
+				{ID: "comm-1", State: CommissionExecuting},
+			},
+			Missions: []Mission{
+				{ID: "mission-orphan", CommissionID: "comm-1", State: MissionInProgress, AgentID: "agent-missing"},
+			},
+			Agents: []Agent{
+				{ID: "agent-missing", State: AgentRunning, SessionID: "session-missing"},
+			},
+		},
+	}
+	sessions := &fakeSessionManager{activeSessions: map[string]struct{}{}}
+	manager, err := NewManager(store, sessions, Config{
+		ResumeTimeout: 10 * time.Second,
+		EventBus:      bus,
+	})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+
+	if _, err := manager.Recover(context.Background()); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if bus.Count() == 0 {
+		t.Fatal("expected recovery audit events to be published")
+	}
+	if bus.CountByType(events.EventTypeHealthCheck) == 0 {
+		t.Fatal("expected at least one health-check audit event")
+	}
+	if bus.CountByType(events.EventTypeStateTransition) == 0 {
+		t.Fatal("expected at least one state-transition audit event")
+	}
 }
