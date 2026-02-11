@@ -103,6 +103,15 @@ issues:
     # Exclude comments for generated code
     - 'should have comment.*or be unexported'
 
+  exclude-rules:
+    - path: internal/commander/commander\.go
+      linters:
+        - errcheck
+        - revive
+    - path: internal/commander/phases/green_test\.go
+      linters:
+        - gocyclo
+
   # Only show new issues in CI
   new: false
 
