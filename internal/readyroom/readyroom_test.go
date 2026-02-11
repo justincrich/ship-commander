@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/ship-commander/sc3/internal/admiral"
 	"github.com/ship-commander/sc3/internal/commission"
+	"github.com/ship-commander/sc3/internal/events"
 )
 
 func TestPlanSpawnsThreeSessionsWithCommissionContext(t *testing.T) {
@@ -263,6 +266,204 @@ func TestPlanReturnsErrorForUnknownMessageRecipient(t *testing.T) {
 	}
 }
 
+func TestPlanSuspendsOnQuestionPublishesEventAndRoutesAnswer(t *testing.T) {
+	t.Parallel()
+
+	factory := &fakeFactory{
+		scripts: map[AgentRole]map[int]SessionOutput{
+			RoleCaptain: {
+				1: {
+					Questions: []admiral.AdmiralQuestion{{
+						QuestionID:    "Q-1",
+						Domain:        "functional",
+						QuestionText:  "Should this mission proceed?",
+						Options:       []string{"Proceed", "Hold"},
+						AllowFreeText: true,
+					}},
+					Missions: []MissionContribution{{MissionID: "M-1", UseCaseIDs: []string{"UC-1", "UC-2"}, SignOff: true}},
+				},
+			},
+			RoleCommander: {
+				1: {
+					Missions: []MissionContribution{{MissionID: "M-1", UseCaseIDs: []string{"UC-1", "UC-2"}, SignOff: true}},
+				},
+			},
+			RoleDesignOfficer: {
+				1: {
+					Missions: []MissionContribution{{MissionID: "M-1", UseCaseIDs: []string{"UC-1", "UC-2"}, SignOff: true}},
+				},
+			},
+		},
+	}
+
+	room := newReadyRoomForTest(t, factory, 2)
+	eventBus := &captureBus{}
+	if err := room.SetEventBus(eventBus); err != nil {
+		t.Fatalf("set event bus: %v", err)
+	}
+
+	answerRelease := make(chan struct{})
+	questionSeen := make(chan admiral.AdmiralQuestion, 1)
+	go func() {
+		question := <-room.QuestionGate().Questions()
+		questionSeen <- question
+		<-answerRelease
+
+		if err := room.QuestionGate().SubmitAnswer(admiral.AdmiralAnswer{
+			QuestionID:     question.QuestionID,
+			SelectedOption: "Proceed",
+		}); err != nil {
+			panic(err)
+		}
+	}()
+
+	resultCh := make(chan PlanResult, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, err := room.Plan(context.Background())
+		if err != nil {
+			errCh <- err
+			return
+		}
+		resultCh <- result
+	}()
+
+	var asked admiral.AdmiralQuestion
+	select {
+	case asked = <-questionSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for surfaced admiral question")
+	}
+
+	if asked.QuestionID != "Q-1" {
+		t.Fatalf("question id = %q, want Q-1", asked.QuestionID)
+	}
+	if got := len(factory.sessionsByRole[RoleCommander].inputs); got != 0 {
+		t.Fatalf("commander inputs before answer = %d, want 0 (planning should be suspended)", got)
+	}
+
+	close(answerRelease)
+
+	var result PlanResult
+	select {
+	case err := <-errCh:
+		t.Fatalf("plan: %v", err)
+	case result = <-resultCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for plan result")
+	}
+
+	if !result.Consensus {
+		t.Fatal("consensus = false, want true")
+	}
+
+	foundQuestionEvent := false
+	for _, event := range eventBus.snapshot() {
+		if event.Type == events.EventTypeAdmiralQuestion && event.EntityID == "Q-1" {
+			foundQuestionEvent = true
+			break
+		}
+	}
+	if !foundQuestionEvent {
+		t.Fatal("expected AdmiralQuestion event to be published")
+	}
+
+	answerRouted := false
+	for _, message := range result.Messages {
+		if message.From == "admiral" && message.To == string(RoleCaptain) && strings.Contains(message.Content, "question_id=Q-1") {
+			answerRouted = true
+			break
+		}
+	}
+	if !answerRouted {
+		t.Fatal("expected admiral answer message routed back to captain")
+	}
+
+	if len(result.QuestionLog) != 1 {
+		t.Fatalf("question log entries = %d, want 1", len(result.QuestionLog))
+	}
+	if result.QuestionLog[0].QuestionID != "Q-1" {
+		t.Fatalf("question log id = %q, want Q-1", result.QuestionLog[0].QuestionID)
+	}
+	if result.QuestionLog[0].Answer.SelectedOption != "Proceed" {
+		t.Fatalf(
+			"question log selected option = %q, want Proceed",
+			result.QuestionLog[0].Answer.SelectedOption,
+		)
+	}
+}
+
+func TestPlanBroadcastsAdmiralAnswerWhenRequested(t *testing.T) {
+	t.Parallel()
+
+	factory := &fakeFactory{
+		scripts: map[AgentRole]map[int]SessionOutput{
+			RoleCaptain: {
+				1: {
+					Questions: []admiral.AdmiralQuestion{{
+						QuestionID:     "Q-2",
+						Domain:         "technical",
+						QuestionText:   "Should this answer be broadcast?",
+						Options:        []string{"Yes", "No"},
+						AllowBroadcast: true,
+						AllowFreeText:  true,
+					}},
+				},
+			},
+			RoleCommander:     {},
+			RoleDesignOfficer: {},
+		},
+	}
+
+	room := newReadyRoomForTest(t, factory, 1)
+
+	go func() {
+		question := <-room.QuestionGate().Questions()
+		_ = room.QuestionGate().SubmitAnswer(admiral.AdmiralAnswer{
+			QuestionID: question.QuestionID,
+			SkipFlag:   true,
+			Broadcast:  true,
+		})
+	}()
+
+	result, err := room.Plan(context.Background())
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+
+	commanderInput := factory.sessionsByRole[RoleCommander].inputs
+	if len(commanderInput) != 1 {
+		t.Fatalf("commander inputs = %d, want 1", len(commanderInput))
+	}
+	if len(commanderInput[0].Inbox) != 1 {
+		t.Fatalf("commander inbox entries = %d, want 1", len(commanderInput[0].Inbox))
+	}
+	if commanderInput[0].Inbox[0].From != "admiral" {
+		t.Fatalf("commander inbox sender = %q, want admiral", commanderInput[0].Inbox[0].From)
+	}
+
+	designInput := factory.sessionsByRole[RoleDesignOfficer].inputs
+	if len(designInput) != 1 {
+		t.Fatalf("design inputs = %d, want 1", len(designInput))
+	}
+	if len(designInput[0].Inbox) != 1 {
+		t.Fatalf("design inbox entries = %d, want 1", len(designInput[0].Inbox))
+	}
+	if designInput[0].Inbox[0].From != "admiral" {
+		t.Fatalf("design inbox sender = %q, want admiral", designInput[0].Inbox[0].From)
+	}
+
+	if len(result.QuestionLog) != 1 {
+		t.Fatalf("question log entries = %d, want 1", len(result.QuestionLog))
+	}
+	if !result.QuestionLog[0].Answer.SkipFlag {
+		t.Fatal("expected skip flag to be preserved")
+	}
+	if !result.QuestionLog[0].Answer.Broadcast {
+		t.Fatal("expected broadcast flag to be preserved")
+	}
+}
+
 func TestNewValidatesInputs(t *testing.T) {
 	t.Parallel()
 
@@ -390,4 +591,27 @@ func (s *fakeSession) Close(_ context.Context) error {
 
 func contains(value, substr string) bool {
 	return strings.Contains(value, substr)
+}
+
+type captureBus struct {
+	mu     sync.Mutex
+	events []events.Event
+}
+
+func (b *captureBus) Subscribe(_ string, _ events.Handler) {}
+
+func (b *captureBus) SubscribeAll(_ events.Handler) {}
+
+func (b *captureBus) Publish(event events.Event) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.events = append(b.events, event)
+}
+
+func (b *captureBus) snapshot() []events.Event {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]events.Event, len(b.events))
+	copy(out, b.events)
+	return out
 }

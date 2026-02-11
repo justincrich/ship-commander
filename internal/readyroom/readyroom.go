@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ship-commander/sc3/internal/admiral"
 	"github.com/ship-commander/sc3/internal/commission"
+	"github.com/ship-commander/sc3/internal/events"
 )
 
 const (
@@ -84,8 +86,9 @@ type SessionInput struct {
 
 // SessionOutput is what one session returns for a single planning iteration.
 type SessionOutput struct {
-	Messages []ReadyRoomMessage
-	Missions []MissionContribution
+	Messages  []ReadyRoomMessage
+	Missions  []MissionContribution
+	Questions []admiral.AdmiralQuestion
 }
 
 // SpawnRequest contains context required to initialize one session.
@@ -108,11 +111,12 @@ type Session interface {
 
 // PlanResult is the deterministic Ready Room output snapshot.
 type PlanResult struct {
-	Missions   []MissionPlan
-	Coverage   map[string]CoverageState
-	Messages   []ReadyRoomMessage
-	Iterations int
-	Consensus  bool
+	Missions    []MissionPlan
+	Coverage    map[string]CoverageState
+	Messages    []ReadyRoomMessage
+	QuestionLog []admiral.QuestionRecord
+	Iterations  int
+	Consensus   bool
 }
 
 // ReadyRoom coordinates planning across captain, commander, and design officer sessions.
@@ -122,10 +126,12 @@ type ReadyRoom struct {
 	maxIterations int
 	now           func() time.Time
 
-	sessions    map[AgentRole]Session
-	mailboxes   map[AgentRole][]ReadyRoomMessage
-	messages    []ReadyRoomMessage
-	missionPlan map[string]*MissionPlan
+	sessions     map[AgentRole]Session
+	mailboxes    map[AgentRole][]ReadyRoomMessage
+	messages     []ReadyRoomMessage
+	missionPlan  map[string]*MissionPlan
+	eventBus     events.Bus
+	questionGate *admiral.QuestionGate
 }
 
 // New builds a ReadyRoom planning coordinator.
@@ -149,7 +155,29 @@ func New(factory SessionFactory, comm commission.Commission, maxIterations int) 
 		mailboxes:     make(map[AgentRole][]ReadyRoomMessage, len(requiredRoles)),
 		messages:      make([]ReadyRoomMessage, 0),
 		missionPlan:   make(map[string]*MissionPlan),
+		eventBus:      events.New(),
+		questionGate:  admiral.NewQuestionGate(1),
 	}, nil
+}
+
+// QuestionGate returns the blocking Admiral question gate used by the planning loop.
+func (r *ReadyRoom) QuestionGate() *admiral.QuestionGate {
+	if r == nil {
+		return nil
+	}
+	return r.questionGate
+}
+
+// SetEventBus overrides the default event bus.
+func (r *ReadyRoom) SetEventBus(bus events.Bus) error {
+	if r == nil {
+		return errors.New("ready room is nil")
+	}
+	if bus == nil {
+		return errors.New("event bus is required")
+	}
+	r.eventBus = bus
+	return nil
 }
 
 // Plan executes the deterministic planning loop until consensus or max iterations.
@@ -192,6 +220,9 @@ func (r *ReadyRoom) Plan(ctx context.Context) (result PlanResult, err error) {
 				return PlanResult{}, fmt.Errorf("execute session role=%s id=%s: %w", role, session.ID(), err)
 			}
 
+			if err := r.handleQuestions(ctx, role, output.Questions); err != nil {
+				return PlanResult{}, err
+			}
 			r.mergeMissionContributions(role, output.Missions)
 			if err := r.routeMessages(role, output.Messages); err != nil {
 				return PlanResult{}, err
@@ -361,6 +392,96 @@ func (r *ReadyRoom) routeMessages(from AgentRole, messages []ReadyRoomMessage) e
 	return nil
 }
 
+func (r *ReadyRoom) handleQuestions(
+	ctx context.Context,
+	role AgentRole,
+	questions []admiral.AdmiralQuestion,
+) error {
+	if len(questions) == 0 {
+		return nil
+	}
+	if r.questionGate == nil {
+		return errors.New("question gate is not configured")
+	}
+
+	for _, question := range questions {
+		question.AskingAgent = string(role)
+
+		if r.eventBus != nil {
+			r.eventBus.Publish(events.Event{
+				Type:       events.EventTypeAdmiralQuestion,
+				EntityType: "planning_question",
+				EntityID:   strings.TrimSpace(question.QuestionID),
+				Payload:    question,
+				Severity:   events.SeverityInfo,
+			})
+		}
+
+		answer, err := r.questionGate.Ask(ctx, question)
+		if err != nil {
+			return fmt.Errorf("question gate ask role=%s question_id=%s: %w", role, question.QuestionID, err)
+		}
+		if err := admiral.ValidateAnswer(question, answer); err != nil {
+			return fmt.Errorf("invalid admiral answer role=%s question_id=%s: %w", role, question.QuestionID, err)
+		}
+		r.routeAdmiralAnswer(role, question, answer)
+	}
+
+	return nil
+}
+
+func (r *ReadyRoom) routeAdmiralAnswer(
+	askingRole AgentRole,
+	question admiral.AdmiralQuestion,
+	answer admiral.AdmiralAnswer,
+) {
+	if r == nil {
+		return
+	}
+
+	message := ReadyRoomMessage{
+		From:      "admiral",
+		To:        string(askingRole),
+		Type:      "admiral_answer",
+		Domain:    strings.TrimSpace(question.Domain),
+		Content:   formatAdmiralAnswer(answer),
+		Timestamp: r.now().UTC(),
+	}
+	r.messages = append(r.messages, message)
+	r.mailboxes[askingRole] = append(r.mailboxes[askingRole], message)
+
+	if !answer.Broadcast {
+		return
+	}
+
+	broadcastMessage := message
+	broadcastMessage.To = "broadcast"
+	for _, role := range requiredRoles {
+		if role == askingRole {
+			continue
+		}
+		r.mailboxes[role] = append(r.mailboxes[role], broadcastMessage)
+	}
+	r.messages = append(r.messages, broadcastMessage)
+}
+
+func formatAdmiralAnswer(answer admiral.AdmiralAnswer) string {
+	parts := []string{fmt.Sprintf("question_id=%s", strings.TrimSpace(answer.QuestionID))}
+	if option := strings.TrimSpace(answer.SelectedOption); option != "" {
+		parts = append(parts, fmt.Sprintf("selected_option=%s", option))
+	}
+	if freeText := strings.TrimSpace(answer.FreeText); freeText != "" {
+		parts = append(parts, fmt.Sprintf("free_text=%s", freeText))
+	}
+	if answer.SkipFlag {
+		parts = append(parts, "skip=true")
+	}
+	if answer.Broadcast {
+		parts = append(parts, "broadcast=true")
+	}
+	return strings.Join(parts, "\n")
+}
+
 func (r *ReadyRoom) buildResult(iterations int, coverage map[string]CoverageState, consensus bool) PlanResult {
 	missions := make([]MissionPlan, 0, len(r.missionPlan))
 	for _, mission := range r.missionPlan {
@@ -376,12 +497,17 @@ func (r *ReadyRoom) buildResult(iterations int, coverage map[string]CoverageStat
 
 	messages := make([]ReadyRoomMessage, len(r.messages))
 	copy(messages, r.messages)
+	questionLog := make([]admiral.QuestionRecord, 0)
+	if r.questionGate != nil {
+		questionLog = r.questionGate.History()
+	}
 
 	return PlanResult{
-		Missions:   missions,
-		Coverage:   coverage,
-		Messages:   messages,
-		Iterations: iterations,
-		Consensus:  consensus,
+		Missions:    missions,
+		Coverage:    coverage,
+		Messages:    messages,
+		QuestionLog: questionLog,
+		Iterations:  iterations,
+		Consensus:   consensus,
 	}
 }

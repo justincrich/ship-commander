@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,24 @@ const (
 	EventMissionHalted = "MISSION_HALTED"
 	// MissionClassificationStandardOps routes mission execution through the standard implementation fast path.
 	MissionClassificationStandardOps = "STANDARD_OPS"
+	// DefaultMaxRevisions is the deterministic default revision ceiling before halting.
+	DefaultMaxRevisions = 3
+)
+
+// HaltReason is a deterministic reason enum for mission halts.
+type HaltReason string
+
+const (
+	// HaltReasonMaxRevisionsExceeded indicates revision count reached the max revision limit.
+	HaltReasonMaxRevisionsExceeded HaltReason = "MaxRevisionsExceeded"
+	// HaltReasonDemoTokenInvalid indicates demo token validation failed for reasons other than missing token.
+	HaltReasonDemoTokenInvalid HaltReason = "DemoTokenInvalid"
+	// HaltReasonDemoTokenMissing indicates the demo token artifact was not found.
+	HaltReasonDemoTokenMissing HaltReason = "DemoTokenMissing"
+	// HaltReasonACExhausted indicates all AC attempts were exhausted before success.
+	HaltReasonACExhausted HaltReason = "ACExhausted"
+	// HaltReasonManualHalt indicates an operator-initiated or explicit manual halt.
+	HaltReasonManualHalt HaltReason = "ManualHalt"
 )
 
 // Mission is an executable mission in an approved manifest.
@@ -25,6 +44,12 @@ type Mission struct {
 	Classification string
 	DependsOn      []string
 	SurfaceArea    []string
+	RevisionCount  int
+	MaxRevisions   int
+	// ACAttemptsExhausted indicates all AC attempts failed and mission must halt deterministically.
+	ACAttemptsExhausted bool
+	// ManualHalt requests deterministic dispatch stop before running mission work.
+	ManualHalt bool
 }
 
 // Slug returns a URL-safe slug for branch naming.
@@ -43,6 +68,8 @@ type Event struct {
 	WaveIndex int
 	Timestamp time.Time
 	Message   string
+	Reason    HaltReason
+	NotifyTUI bool
 }
 
 // DispatchRequest contains mission dispatch details for harness implementations.
@@ -266,27 +293,20 @@ func (c *Commander) runBatch(ctx context.Context, waveIndex int, batch []Mission
 }
 
 func (c *Commander) runMission(ctx context.Context, waveIndex int, mission Mission) error {
+	if reason, message, shouldHalt := haltBeforeDispatch(mission); shouldHalt {
+		_ = c.publishHalt(ctx, waveIndex, mission.ID, reason, message)
+		return fmt.Errorf("mission %s halted before dispatch: %s", mission.ID, message)
+	}
+
 	worktreePath, err := c.worktrees.Create(ctx, mission)
 	if err != nil {
-		_ = c.publish(ctx, Event{
-			Type:      EventMissionHalted,
-			MissionID: mission.ID,
-			WaveIndex: waveIndex,
-			Timestamp: c.now().UTC(),
-			Message:   fmt.Sprintf("worktree creation failed: %v", err),
-		})
+		_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, fmt.Sprintf("worktree creation failed: %v", err))
 		return fmt.Errorf("create worktree for %s: %w", mission.ID, err)
 	}
 
 	release, err := c.locks.Acquire(ctx, mission.ID, mission.SurfaceArea)
 	if err != nil {
-		_ = c.publish(ctx, Event{
-			Type:      EventMissionHalted,
-			MissionID: mission.ID,
-			WaveIndex: waveIndex,
-			Timestamp: c.now().UTC(),
-			Message:   fmt.Sprintf("surface-area lock failed: %v", err),
-		})
+		_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, fmt.Sprintf("surface-area lock failed: %v", err))
 		return fmt.Errorf("acquire lock for %s: %w", mission.ID, err)
 	}
 	defer func() {
@@ -297,46 +317,28 @@ func (c *Commander) runMission(ctx context.Context, waveIndex int, mission Missi
 		Mission:      mission,
 		WorktreePath: worktreePath,
 	}); err != nil {
-		_ = c.publish(ctx, Event{
-			Type:      EventMissionHalted,
-			MissionID: mission.ID,
-			WaveIndex: waveIndex,
-			Timestamp: c.now().UTC(),
-			Message:   fmt.Sprintf("dispatch failed: %v", err),
-		})
+		_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, fmt.Sprintf("dispatch failed: %v", err))
 		return fmt.Errorf("dispatch implementer for %s: %w", mission.ID, err)
 	}
 
 	if isStandardOpsMission(mission) {
 		if err := c.verifier.VerifyImplement(ctx, mission, worktreePath); err != nil {
-			_ = c.publish(ctx, Event{
-				Type:      EventMissionHalted,
-				MissionID: mission.ID,
-				WaveIndex: waveIndex,
-				Timestamp: c.now().UTC(),
-				Message:   fmt.Sprintf("verification failed: %v", err),
-			})
+			_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, fmt.Sprintf("verification failed: %v", err))
 			return fmt.Errorf("verify implement mission %s: %w", mission.ID, err)
 		}
 		if err := c.demoTokens.Validate(ctx, mission, worktreePath); err != nil {
-			_ = c.publish(ctx, Event{
-				Type:      EventMissionHalted,
-				MissionID: mission.ID,
-				WaveIndex: waveIndex,
-				Timestamp: c.now().UTC(),
-				Message:   fmt.Sprintf("demo token validation failed: %v", err),
-			})
+			_ = c.publishHalt(
+				ctx,
+				waveIndex,
+				mission.ID,
+				classifyDemoTokenHaltReason(err),
+				fmt.Sprintf("demo token validation failed: %v", err),
+			)
 			return fmt.Errorf("validate demo token for %s: %w", mission.ID, err)
 		}
 	} else {
 		if err := c.verifier.Verify(ctx, mission, worktreePath); err != nil {
-			_ = c.publish(ctx, Event{
-				Type:      EventMissionHalted,
-				MissionID: mission.ID,
-				WaveIndex: waveIndex,
-				Timestamp: c.now().UTC(),
-				Message:   fmt.Sprintf("verification failed: %v", err),
-			})
+			_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, fmt.Sprintf("verification failed: %v", err))
 			return fmt.Errorf("verify mission %s: %w", mission.ID, err)
 		}
 	}
@@ -354,8 +356,65 @@ func (c *Commander) runMission(ctx context.Context, waveIndex int, mission Missi
 	return nil
 }
 
+func (c *Commander) publishHalt(
+	ctx context.Context,
+	waveIndex int,
+	missionID string,
+	reason HaltReason,
+	message string,
+) error {
+	return c.publish(ctx, Event{
+		Type:      EventMissionHalted,
+		MissionID: missionID,
+		WaveIndex: waveIndex,
+		Timestamp: c.now().UTC(),
+		Message:   message,
+		Reason:    reason,
+		NotifyTUI: true,
+	})
+}
+
 func (c *Commander) publish(ctx context.Context, event Event) error {
 	return c.events.Publish(ctx, event)
+}
+
+func haltBeforeDispatch(mission Mission) (HaltReason, string, bool) {
+	if mission.ManualHalt {
+		return HaltReasonManualHalt, "mission manually halted before dispatch", true
+	}
+	if mission.ACAttemptsExhausted {
+		return HaltReasonACExhausted, "all acceptance criteria attempts exhausted", true
+	}
+
+	maxRevisions := mission.MaxRevisions
+	if maxRevisions <= 0 {
+		maxRevisions = DefaultMaxRevisions
+	}
+	if mission.RevisionCount >= maxRevisions {
+		return HaltReasonMaxRevisionsExceeded,
+			fmt.Sprintf("revision count %d reached max revisions %d", mission.RevisionCount, maxRevisions),
+			true
+	}
+
+	return "", "", false
+}
+
+func classifyDemoTokenHaltReason(err error) HaltReason {
+	if err == nil {
+		return HaltReasonDemoTokenInvalid
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return HaltReasonDemoTokenMissing
+	}
+
+	lowerMessage := strings.ToLower(err.Error())
+	if strings.Contains(lowerMessage, "does not exist") ||
+		strings.Contains(lowerMessage, "not found") ||
+		strings.Contains(lowerMessage, "missing") {
+		return HaltReasonDemoTokenMissing
+	}
+
+	return HaltReasonDemoTokenInvalid
 }
 
 func isStandardOpsMission(mission Mission) bool {

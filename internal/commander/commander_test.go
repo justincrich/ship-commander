@@ -3,6 +3,7 @@ package commander
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -179,6 +180,12 @@ func TestCommanderExecutePublishesHaltedOnVerifyFailure(t *testing.T) {
 	}
 	if events.events[0].Type != EventMissionHalted {
 		t.Fatalf("first event = %s, want %s", events.events[0].Type, EventMissionHalted)
+	}
+	if events.events[0].Reason != HaltReasonManualHalt {
+		t.Fatalf("halt reason = %s, want %s", events.events[0].Reason, HaltReasonManualHalt)
+	}
+	if !events.events[0].NotifyTUI {
+		t.Fatal("expected TUI notification on halted mission event")
 	}
 }
 
@@ -360,6 +367,122 @@ func TestCommanderExecuteStandardOpsHaltsOnDemoTokenFailure(t *testing.T) {
 	}
 	if len(events.events) == 0 || events.events[0].Type != EventMissionHalted {
 		t.Fatalf("events = %v, want first event %s", events.events, EventMissionHalted)
+	}
+	if events.events[0].Reason != HaltReasonDemoTokenInvalid {
+		t.Fatalf("halt reason = %s, want %s", events.events[0].Reason, HaltReasonDemoTokenInvalid)
+	}
+	if !events.events[0].NotifyTUI {
+		t.Fatal("expected TUI notification on halted mission event")
+	}
+}
+
+func TestCommanderExecuteHaltsBeforeDispatchWhenRevisionLimitReached(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeManifestStore{
+		manifest: []Mission{{ID: "m1", Title: "Mission One", RevisionCount: 3, MaxRevisions: 3}},
+		ready:    [][]string{{"m1"}},
+	}
+	worktrees := &fakeWorktreeManager{paths: map[string]string{"m1": "/tmp/worktree/m1"}}
+	locks := &fakeSurfaceLocker{}
+	harness := &fakeHarness{}
+	verifier := &fakeVerifier{}
+	demoTokens := &fakeDemoTokenValidator{}
+	events := &fakeEventPublisher{}
+
+	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
+	if err != nil {
+		t.Fatalf("new commander: %v", err)
+	}
+
+	if err := cmd.Execute(context.Background(), "commission-1"); err == nil {
+		t.Fatal("expected execute error, got nil")
+	}
+
+	if len(worktrees.created) != 0 {
+		t.Fatalf("worktrees created = %v, want none because mission halts before dispatch", worktrees.created)
+	}
+	if len(events.events) == 0 || events.events[0].Type != EventMissionHalted {
+		t.Fatalf("events = %v, want first event %s", events.events, EventMissionHalted)
+	}
+	if events.events[0].Reason != HaltReasonMaxRevisionsExceeded {
+		t.Fatalf("halt reason = %s, want %s", events.events[0].Reason, HaltReasonMaxRevisionsExceeded)
+	}
+	if !events.events[0].NotifyTUI {
+		t.Fatal("expected TUI notification on halted mission event")
+	}
+}
+
+func TestCommanderExecuteHaltsBeforeDispatchWhenACAttemptsExhausted(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeManifestStore{
+		manifest: []Mission{{ID: "m1", Title: "Mission One", ACAttemptsExhausted: true}},
+		ready:    [][]string{{"m1"}},
+	}
+	worktrees := &fakeWorktreeManager{paths: map[string]string{"m1": "/tmp/worktree/m1"}}
+	locks := &fakeSurfaceLocker{}
+	harness := &fakeHarness{}
+	verifier := &fakeVerifier{}
+	demoTokens := &fakeDemoTokenValidator{}
+	events := &fakeEventPublisher{}
+
+	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
+	if err != nil {
+		t.Fatalf("new commander: %v", err)
+	}
+
+	if err := cmd.Execute(context.Background(), "commission-1"); err == nil {
+		t.Fatal("expected execute error, got nil")
+	}
+
+	if len(worktrees.created) != 0 {
+		t.Fatalf("worktrees created = %v, want none because mission halts before dispatch", worktrees.created)
+	}
+	if len(events.events) == 0 || events.events[0].Type != EventMissionHalted {
+		t.Fatalf("events = %v, want first event %s", events.events, EventMissionHalted)
+	}
+	if events.events[0].Reason != HaltReasonACExhausted {
+		t.Fatalf("halt reason = %s, want %s", events.events[0].Reason, HaltReasonACExhausted)
+	}
+	if !events.events[0].NotifyTUI {
+		t.Fatal("expected TUI notification on halted mission event")
+	}
+}
+
+func TestCommanderExecuteStandardOpsHaltsOnMissingDemoToken(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeManifestStore{
+		manifest: []Mission{{ID: "m1", Title: "Mission One", Classification: MissionClassificationStandardOps}},
+		ready:    [][]string{{"m1"}},
+	}
+	worktrees := &fakeWorktreeManager{paths: map[string]string{"m1": "/tmp/worktree/m1"}}
+	locks := &fakeSurfaceLocker{}
+	harness := &fakeHarness{}
+	verifier := &fakeVerifier{}
+	demoTokens := &fakeDemoTokenValidator{err: os.ErrNotExist}
+	events := &fakeEventPublisher{}
+
+	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
+	if err != nil {
+		t.Fatalf("new commander: %v", err)
+	}
+
+	if err := cmd.Execute(context.Background(), "commission-1"); err == nil {
+		t.Fatal("expected execute error, got nil")
+	}
+	if verifier.VerifyImplementCallCount() != 1 {
+		t.Fatalf("verify implement calls = %d, want 1", verifier.VerifyImplementCallCount())
+	}
+	if len(events.events) == 0 || events.events[0].Type != EventMissionHalted {
+		t.Fatalf("events = %v, want first event %s", events.events, EventMissionHalted)
+	}
+	if events.events[0].Reason != HaltReasonDemoTokenMissing {
+		t.Fatalf("halt reason = %s, want %s", events.events[0].Reason, HaltReasonDemoTokenMissing)
+	}
+	if !events.events[0].NotifyTUI {
+		t.Fatal("expected TUI notification on halted mission event")
 	}
 }
 
