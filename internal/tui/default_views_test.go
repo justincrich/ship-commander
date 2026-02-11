@@ -53,6 +53,22 @@ func TestDefaultViewDefinitionsIncludeShipBridgeFocusOrder(t *testing.T) {
 	}
 }
 
+func TestDefaultViewDefinitionsIncludePlanReviewFocusOrder(t *testing.T) {
+	t.Parallel()
+
+	definitions := DefaultViewDefinitions()
+	definition, ok := definitions[ViewPlanReview]
+	if !ok {
+		t.Fatalf("missing %q view definition", ViewPlanReview)
+	}
+	if len(definition.FocusOrder) != 3 {
+		t.Fatalf("plan review focus order length = %d, want 3", len(definition.FocusOrder))
+	}
+	if definition.FocusOrder[0] != "manifest_panel" {
+		t.Fatalf("first plan review focus panel = %q, want manifest_panel", definition.FocusOrder[0])
+	}
+}
+
 func TestDefaultModelEnterNavigatesToShipBridge(t *testing.T) {
 	t.Parallel()
 
@@ -69,5 +85,23 @@ func TestDefaultModelEnterNavigatesToShipBridge(t *testing.T) {
 	rendered := typed.View()
 	if !strings.Contains(rendered, "Mission Board") {
 		t.Fatalf("expected ship bridge render after enter, got:\n%s", rendered)
+	}
+}
+
+func TestDefaultPlanReviewRendererContainsKeySections(t *testing.T) {
+	t.Parallel()
+
+	definitions := DefaultViewDefinitions()
+	definition, ok := definitions[ViewPlanReview]
+	if !ok {
+		t.Fatalf("missing %q view definition", ViewPlanReview)
+	}
+
+	model := NewDefaultAppModel()
+	rendered := definition.Render(*model)
+	for _, expected := range []string{"PLAN REVIEW", "Coverage Matrix", "Dependency Graph"} {
+		if !strings.Contains(rendered, expected) {
+			t.Fatalf("plan review default render missing %q\n%s", expected, rendered)
+		}
 	}
 }

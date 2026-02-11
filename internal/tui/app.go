@@ -23,6 +23,10 @@ const (
 	ViewFleetOverview ViewID = "fleet_overview"
 	// ViewShipBridge is the per-ship execution dashboard.
 	ViewShipBridge ViewID = "ship_bridge"
+	// ViewReadyRoom is the planning session view.
+	ViewReadyRoom ViewID = "ready_room"
+	// ViewPlanReview is the plan review drill-down view.
+	ViewPlanReview ViewID = "plan_review"
 	// ViewMissionDetail is the mission drill-down view.
 	ViewMissionDetail ViewID = "mission_detail"
 	// ViewAgentDetail is the agent drill-down view.

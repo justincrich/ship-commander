@@ -55,6 +55,64 @@ func DefaultViewDefinitions() map[ViewID]ViewDefinition {
 				})
 			},
 		},
+		ViewPlanReview: {
+			FocusOrder: []string{"manifest_panel", "analysis_panel", "toolbar"},
+			Render: func(model AppModel) string {
+				width, _ := model.Dimensions()
+				if width == 0 {
+					width = StandardLayoutMinWidth
+				}
+
+				return views.RenderPlanReview(views.PlanReviewConfig{
+					Width:          width,
+					ShipName:       "USS Enterprise",
+					DirectiveTitle: "Demonstrate plan review",
+					Missions: []views.PlanReviewMission{
+						{
+							ID:             "M-001",
+							Title:          "Prepare mission manifest",
+							Classification: "STANDARD_OPS",
+							Wave:           1,
+							UseCaseRefs:    []string{"UC-TUI-01", "UC-TUI-03"},
+							ACTotal:        3,
+							SurfaceArea:    "internal/tui/views",
+						},
+						{
+							ID:             "M-002",
+							Title:          "Validate dependency graph",
+							Classification: "RED_ALERT",
+							Wave:           2,
+							UseCaseRefs:    []string{"UC-TUI-15"},
+							ACTotal:        2,
+							SurfaceArea:    "internal/commander",
+						},
+					},
+					Coverage: []views.PlanReviewCoverageRow{
+						{UseCaseID: "UC-TUI-01", MissionIDs: []string{"M-001"}, Status: views.PlanReviewCoverageCovered},
+						{UseCaseID: "UC-TUI-03", MissionIDs: []string{"M-001"}, Status: views.PlanReviewCoveragePartial},
+						{UseCaseID: "UC-TUI-15", MissionIDs: nil, Status: views.PlanReviewCoverageUncovered},
+					},
+					Dependencies: []views.PlanReviewDependencyWave{
+						{
+							Wave: 1,
+							Missions: []views.PlanReviewDependencyMission{
+								{ID: "M-001", Title: "Prepare mission manifest", Status: "done"},
+							},
+						},
+						{
+							Wave: 2,
+							Missions: []views.PlanReviewDependencyMission{
+								{ID: "M-002", Title: "Validate dependency graph", Status: "waiting", Dependencies: []string{"M-001"}},
+							},
+						},
+					},
+					SignoffsDone:       2,
+					SignoffsTotal:      3,
+					AnalysisTab:        views.PlanReviewAnalysisCoverage,
+					ToolbarHighlighted: 0,
+				})
+			},
+		},
 	}
 }
 
