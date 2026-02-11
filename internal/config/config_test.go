@@ -131,6 +131,113 @@ log_max_files = 7
 	}
 }
 
+func TestLoadRoleAndDomainHarnessModelConfig(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeFile(t, filepath.Join(work, ".sc3", "config.toml"), `
+[defaults]
+harness = "claude"
+model = "sonnet"
+
+[roles.captain]
+harness = "claude"
+model = "opus"
+
+[roles.ensign]
+harness = "claude"
+model = "haiku"
+
+[roles.ensign.backend]
+model = "sonnet"
+`)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		if chdirErr := os.Chdir(cwd); chdirErr != nil {
+			t.Fatalf("restore cwd: %v", chdirErr)
+		}
+	})
+	if err := os.Chdir(work); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	cfg, err := Load(context.Background())
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	if cfg.DefaultHarness != "claude" {
+		t.Fatalf("default harness = %q, want claude", cfg.DefaultHarness)
+	}
+	if cfg.DefaultModel != "sonnet" {
+		t.Fatalf("default model = %q, want sonnet", cfg.DefaultModel)
+	}
+	captain := cfg.Roles["captain"]
+	if captain.Harness != "claude" || captain.Model != "opus" {
+		t.Fatalf("captain role config = %#v", captain)
+	}
+	backend := cfg.Roles["ensign"].Domains["backend"]
+	if backend.Harness != "claude" || backend.Model != "sonnet" {
+		t.Fatalf("ensign backend config = %#v", backend)
+	}
+}
+
+func TestResolveHarnessModelPriorityAndFallback(t *testing.T) {
+	cfg := defaults()
+	cfg.DefaultHarness = "codex"
+	cfg.DefaultModel = "gpt-5-codex"
+	cfg.Roles["ensign"] = RoleHarnessConfig{
+		Harness: "claude",
+		Model:   "haiku",
+		Domains: map[string]HarnessModelConfig{
+			"backend": {
+				Model: "sonnet",
+			},
+		},
+	}
+
+	harnessName, modelName, warnings, err := cfg.ResolveHarnessModel(
+		"ensign",
+		"backend",
+		map[string]bool{"claude": true, "codex": true},
+	)
+	if err != nil {
+		t.Fatalf("resolve role/domain config: %v", err)
+	}
+	if harnessName != "claude" {
+		t.Fatalf("resolved harness = %q, want claude", harnessName)
+	}
+	if modelName != "sonnet" {
+		t.Fatalf("resolved model = %q, want sonnet (domain override)", modelName)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+
+	harnessName, modelName, warnings, err = cfg.ResolveHarnessModel(
+		"ensign",
+		"backend",
+		map[string]bool{"claude": false, "codex": true},
+	)
+	if err != nil {
+		t.Fatalf("resolve fallback config: %v", err)
+	}
+	if harnessName != "codex" {
+		t.Fatalf("fallback harness = %q, want codex", harnessName)
+	}
+	if modelName != "sonnet" {
+		t.Fatalf("fallback model = %q, want sonnet", modelName)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("warning count = %d, want 1", len(warnings))
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 
