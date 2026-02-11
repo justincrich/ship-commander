@@ -27,6 +27,53 @@ type contextKey string
 
 const runIDContextKey contextKey = "run_id"
 
+type commandSpan interface {
+	SetAttributes(...attribute.KeyValue)
+	RecordError(error, ...trace.EventOption)
+	SetStatus(codes.Code, string)
+	SpanContext() trace.SpanContext
+	End(...trace.SpanEndOption)
+}
+
+type traceSpanAdapter struct {
+	span trace.Span
+}
+
+func (a traceSpanAdapter) SetAttributes(attrs ...attribute.KeyValue) {
+	a.span.SetAttributes(attrs...)
+}
+
+func (a traceSpanAdapter) RecordError(err error, options ...trace.EventOption) {
+	a.span.RecordError(err, options...)
+}
+
+func (a traceSpanAdapter) SetStatus(code codes.Code, description string) {
+	a.span.SetStatus(code, description)
+}
+
+func (a traceSpanAdapter) SpanContext() trace.SpanContext {
+	return a.span.SpanContext()
+}
+
+func (a traceSpanAdapter) End(options ...trace.SpanEndOption) {
+	a.span.End(options...)
+}
+
+var (
+	loadConfigFn       = config.Load
+	newRuntimeLoggerFn = logging.New
+	initTelemetryFn    = telemetry.Init
+	newRootCommandFn   = newRootCommand
+	startCommandSpanFn = func(ctx context.Context, commandName string, attrs []attribute.KeyValue) (context.Context, commandSpan) {
+		spanCtx, span := otel.Tracer("sc3/command").Start(
+			ctx,
+			"sc3."+commandName,
+			trace.WithAttributes(attrs...),
+		)
+		return spanCtx, traceSpanAdapter{span: span}
+	}
+)
+
 func main() {
 	if err := run(context.Background(), os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -35,12 +82,23 @@ func main() {
 }
 
 func run(ctx context.Context, args []string) error {
-	cfg, err := config.Load(ctx)
+	telemetry.ServiceVersion = Version
+	shutdownTelemetry, err := initTelemetryFn(ctx)
+	if err != nil {
+		return fmt.Errorf("initialize telemetry: %w", err)
+	}
+	defer func() {
+		if shutdownTelemetry != nil {
+			shutdownTelemetry()
+		}
+	}()
+
+	cfg, err := loadConfigFn(ctx)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	logger, err := logging.New(ctx)
+	logger, err := newRuntimeLoggerFn(ctx)
 	if err != nil {
 		return fmt.Errorf("initialize logging: %w", err)
 	}
@@ -50,28 +108,17 @@ func run(ctx context.Context, args []string) error {
 		}
 	}()
 
-	telemetry.ServiceVersion = Version
-	shutdownTelemetry, err := telemetry.Init(ctx)
-	if err != nil {
-		return fmt.Errorf("initialize telemetry: %w", err)
-	}
-	defer shutdownTelemetry()
-
-	cmd := newRootCommand(ctx, cfg, logger.Logger)
+	cmd := newRootCommandFn(ctx, cfg, logger.Logger)
 	cmd.SetArgs(args)
 
 	spanContext := ctx
-	var rootSpan trace.Span
+	var rootSpan commandSpan
 	commandName := resolveCommandName(args)
 	if commandName != "bugreport" {
 		runID := uuid.NewString()
 		attrs := rootSpanAttributes(commandName, runID, args)
 		spanContext = context.WithValue(spanContext, runIDContextKey, runID)
-		spanContext, rootSpan = otel.Tracer("sc3/command").Start(
-			spanContext,
-			"sc3."+commandName,
-			trace.WithAttributes(attrs...),
-		)
+		spanContext, rootSpan = startCommandSpanFn(spanContext, commandName, attrs)
 		rootSpan.SetAttributes(attribute.String("trace_id", rootSpan.SpanContext().TraceID().String()))
 		defer rootSpan.End()
 	}
