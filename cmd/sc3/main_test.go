@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/google/uuid"
 	"github.com/ship-commander/sc3/internal/config"
+	"github.com/ship-commander/sc3/internal/harness"
 	"github.com/ship-commander/sc3/internal/logging"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel/attribute"
@@ -549,6 +551,71 @@ func TestRunSetsTelemetryDebugConsoleExporterFromFlags(t *testing.T) {
 	}
 }
 
+func TestRunFailsWhenHarnessAvailabilityCheckFails(t *testing.T) {
+	restore := snapshotRunHooks()
+	defer restore()
+
+	initTelemetryFn = func(context.Context) (func(), error) { return func() {}, nil }
+	loadConfigFn = func(context.Context) (*config.Config, error) { return testRuntimeConfig(), nil }
+	newRuntimeLoggerFn = func(context.Context, ...logging.Option) (*logging.RuntimeLogger, error) {
+		return &logging.RuntimeLogger{Logger: testLogger()}, nil
+	}
+	startCommandSpanFn = func(ctx context.Context, _ string, _ []attribute.KeyValue) (context.Context, commandSpan) {
+		return ctx, newFakeCommandSpan()
+	}
+	resolveHarnessAvailabilityFn = func(string) (string, harness.Availability, []string, error) {
+		return "", harness.Availability{}, nil, errors.New("tmux unavailable")
+	}
+
+	err := run(context.Background(), []string{"plan"})
+	if err == nil {
+		t.Fatal("expected harness availability error")
+	}
+	if !strings.Contains(err.Error(), "check harness availability") {
+		t.Fatalf("error = %v, want check harness availability context", err)
+	}
+}
+
+func TestRunAppliesHarnessFallbackToConfig(t *testing.T) {
+	restore := snapshotRunHooks()
+	defer restore()
+
+	initTelemetryFn = func(context.Context) (func(), error) { return func() {}, nil }
+	loadConfigFn = func(context.Context) (*config.Config, error) {
+		cfg := testRuntimeConfig()
+		cfg.DefaultHarness = "claude"
+		return cfg, nil
+	}
+	newRuntimeLoggerFn = func(context.Context, ...logging.Option) (*logging.RuntimeLogger, error) {
+		return &logging.RuntimeLogger{Logger: testLogger()}, nil
+	}
+	startCommandSpanFn = func(ctx context.Context, _ string, _ []attribute.KeyValue) (context.Context, commandSpan) {
+		return ctx, newFakeCommandSpan()
+	}
+	resolveHarnessAvailabilityFn = func(string) (string, harness.Availability, []string, error) {
+		return "codex", harness.Availability{Codex: true, Tmux: true, BD: true}, []string{"fallback warning"}, nil
+	}
+
+	capturedHarness := ""
+	newRootCommandFn = func(_ context.Context, cfg *config.Config, _ *log.Logger) *cobra.Command {
+		capturedHarness = cfg.DefaultHarness
+		return &cobra.Command{
+			Use:                "sc3",
+			DisableFlagParsing: true,
+			RunE: func(*cobra.Command, []string) error {
+				return nil
+			},
+		}
+	}
+
+	if err := run(context.Background(), []string{"plan"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if capturedHarness != "codex" {
+		t.Fatalf("captured default harness = %q, want %q", capturedHarness, "codex")
+	}
+}
+
 func snapshotRunHooks() func() {
 	prevLoadConfig := loadConfigFn
 	prevNewLogger := newRuntimeLoggerFn
@@ -556,8 +623,17 @@ func snapshotRunHooks() func() {
 	prevSetTelemetryDebugConsoleExporter := setTelemetryDebugConsoleExporterFn
 	prevInitTelemetry := initTelemetryFn
 	prevSetInvariantChecks := setInvariantChecksEnabledFn
+	prevResolveHarnessAvailability := resolveHarnessAvailabilityFn
 	prevRootCommand := newRootCommandFn
 	prevStartSpan := startCommandSpanFn
+
+	resolveHarnessAvailabilityFn = func(configured string) (string, harness.Availability, []string, error) {
+		candidate := strings.TrimSpace(configured)
+		if candidate == "" {
+			candidate = "codex"
+		}
+		return candidate, harness.Availability{Claude: true, Codex: true, Tmux: true, BD: true}, nil, nil
+	}
 
 	return func() {
 		loadConfigFn = prevLoadConfig
@@ -566,6 +642,7 @@ func snapshotRunHooks() func() {
 		setTelemetryDebugConsoleExporterFn = prevSetTelemetryDebugConsoleExporter
 		initTelemetryFn = prevInitTelemetry
 		setInvariantChecksEnabledFn = prevSetInvariantChecks
+		resolveHarnessAvailabilityFn = prevResolveHarnessAvailability
 		newRootCommandFn = prevRootCommand
 		startCommandSpanFn = prevStartSpan
 	}
@@ -603,6 +680,7 @@ func captureRunStderr(t *testing.T, runFn func() error) string {
 
 func testRuntimeConfig() *config.Config {
 	return &config.Config{
+		DefaultHarness:  "codex",
 		LogMaxSizeBytes: 10 * 1024 * 1024,
 		LogMaxFiles:     5,
 	}

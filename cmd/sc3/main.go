@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/google/uuid"
 	"github.com/ship-commander/sc3/internal/config"
+	"github.com/ship-commander/sc3/internal/harness"
 	"github.com/ship-commander/sc3/internal/logging"
 	"github.com/ship-commander/sc3/internal/telemetry"
 	"github.com/ship-commander/sc3/internal/telemetry/invariants"
@@ -69,6 +70,7 @@ var (
 	setTelemetryDebugConsoleExporterFn = telemetry.SetDebugConsoleExporter
 	initTelemetryFn                    = telemetry.Init
 	setInvariantChecksEnabledFn        = invariants.SetEnabled
+	resolveHarnessAvailabilityFn       = harness.ResolveConfiguredHarness
 	newRootCommandFn                   = newRootCommand
 	startCommandSpanFn                 = func(ctx context.Context, commandName string, attrs []attribute.KeyValue) (context.Context, commandSpan) {
 		spanCtx, span := otel.Tracer("sc3/command").Start(
@@ -157,6 +159,30 @@ func run(ctx context.Context, args []string) error {
 	}()
 	if debugConsoleExporterEnabled {
 		logger.Logger.With("logging", "DEBUG", "otel_exporter", "console").Info("debug mode enabled")
+	}
+
+	resolvedHarness, availability, warnings, err := resolveHarnessAvailabilityFn(cfg.DefaultHarness)
+	if err != nil {
+		return fmt.Errorf("check harness availability: %w", err)
+	}
+	cfg.DefaultHarness = resolvedHarness
+
+	availableHarnesses := strings.Join(availability.AvailableHarnesses(), ",")
+	if availableHarnesses == "" {
+		availableHarnesses = "none"
+	}
+	logger.Logger.With(
+		"configured_harness",
+		cfg.DefaultHarness,
+		"available_harnesses",
+		availableHarnesses,
+		"tmux_available",
+		availability.Tmux,
+		"bd_available",
+		availability.BD,
+	).Info("harness availability")
+	for _, warning := range warnings {
+		logger.Logger.With("warning", warning).Warn("harness fallback")
 	}
 
 	cmd := newRootCommandFn(spanContext, cfg, logger.Logger)
