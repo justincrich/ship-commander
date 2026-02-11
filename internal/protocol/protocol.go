@@ -43,6 +43,8 @@ const (
 var ErrWaitForClaimTimeout = errors.New("timed out waiting for protocol claim")
 
 // ProtocolEvent is the normalized persisted protocol event envelope.
+//
+//nolint:revive // Name kept for protocol schema clarity across packages.
 type ProtocolEvent struct {
 	ProtocolVersion string          `json:"protocol_version"`
 	Type            string          `json:"type"`

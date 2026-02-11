@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ship-commander/sc3/internal/admiral"
 )
 
 const (
@@ -19,6 +21,13 @@ const (
 	MissionClassificationStandardOps = "STANDARD_OPS"
 	// DefaultMaxRevisions is the deterministic default revision ceiling before halting.
 	DefaultMaxRevisions = 3
+)
+
+var (
+	// ErrApprovalFeedback indicates execution was paused because Admiral requested planning feedback.
+	ErrApprovalFeedback = errors.New("admiral requested planning feedback")
+	// ErrApprovalShelved indicates execution was paused because Admiral shelved the manifest.
+	ErrApprovalShelved = errors.New("admiral shelved mission manifest")
 )
 
 // HaltReason is a deterministic reason enum for mission halts.
@@ -43,6 +52,7 @@ type Mission struct {
 	Title          string
 	Classification string
 	DependsOn      []string
+	UseCaseIDs     []string
 	SurfaceArea    []string
 	RevisionCount  int
 	MaxRevisions   int
@@ -115,6 +125,21 @@ type DemoTokenValidator interface {
 	Validate(ctx context.Context, mission Mission, worktreePath string) error
 }
 
+// ApprovalGate presents mission manifests to Admiral and blocks until a decision is made.
+type ApprovalGate interface {
+	AwaitDecision(ctx context.Context, request admiral.ApprovalRequest) (admiral.ApprovalResponse, error)
+}
+
+// FeedbackInjector reinjects Admiral feedback into Ready Room planning sessions.
+type FeedbackInjector interface {
+	InjectPlanningFeedback(ctx context.Context, commissionID, feedbackText string) error
+}
+
+// PlanShelver persists a shelved plan for later resume/re-execute flows.
+type PlanShelver interface {
+	ShelvePlan(ctx context.Context, commissionID, feedbackText string) error
+}
+
 // EventPublisher publishes protocol events for mission status changes.
 type EventPublisher interface {
 	Publish(ctx context.Context, event Event) error
@@ -133,6 +158,9 @@ type Commander struct {
 	harness       Harness
 	verifier      Verifier
 	demoTokens    DemoTokenValidator
+	approvalGate  ApprovalGate
+	feedback      FeedbackInjector
+	shelver       PlanShelver
 	events        EventPublisher
 	wipLimit      int
 	now           func() time.Time
@@ -146,6 +174,9 @@ func New(
 	harness Harness,
 	verifier Verifier,
 	demoTokens DemoTokenValidator,
+	approvalGate ApprovalGate,
+	feedback FeedbackInjector,
+	shelver PlanShelver,
 	events EventPublisher,
 	cfg CommanderConfig,
 ) (*Commander, error) {
@@ -167,6 +198,15 @@ func New(
 	if demoTokens == nil {
 		return nil, errors.New("demo token validator is required")
 	}
+	if approvalGate == nil {
+		return nil, errors.New("approval gate is required")
+	}
+	if feedback == nil {
+		return nil, errors.New("feedback injector is required")
+	}
+	if shelver == nil {
+		return nil, errors.New("plan shelver is required")
+	}
 	if events == nil {
 		return nil, errors.New("event publisher is required")
 	}
@@ -181,6 +221,9 @@ func New(
 		harness:       harness,
 		verifier:      verifier,
 		demoTokens:    demoTokens,
+		approvalGate:  approvalGate,
+		feedback:      feedback,
+		shelver:       shelver,
 		events:        events,
 		wipLimit:      cfg.WIPLimit,
 		now:           time.Now,
@@ -200,6 +243,9 @@ func (c *Commander) Execute(ctx context.Context, commissionID string) error {
 	waves, err := ComputeWaves(manifest)
 	if err != nil {
 		return fmt.Errorf("compute waves: %w", err)
+	}
+	if err := c.resolveAdmiralDecision(ctx, commissionID, manifest, waves); err != nil {
+		return err
 	}
 
 	for i, wave := range waves {
@@ -419,4 +465,79 @@ func classifyDemoTokenHaltReason(err error) HaltReason {
 
 func isStandardOpsMission(mission Mission) bool {
 	return strings.EqualFold(strings.TrimSpace(mission.Classification), MissionClassificationStandardOps)
+}
+
+func (c *Commander) resolveAdmiralDecision(
+	ctx context.Context,
+	commissionID string,
+	manifest []Mission,
+	waves [][]Mission,
+) error {
+	response, err := c.approvalGate.AwaitDecision(ctx, buildApprovalRequest(commissionID, manifest, waves))
+	if err != nil {
+		return fmt.Errorf("await admiral approval: %w", err)
+	}
+
+	switch response.Decision {
+	case admiral.ApprovalDecisionApproved:
+		return nil
+	case admiral.ApprovalDecisionFeedback:
+		feedbackText := strings.TrimSpace(response.FeedbackText)
+		if err := c.feedback.InjectPlanningFeedback(ctx, commissionID, feedbackText); err != nil {
+			return fmt.Errorf("inject planning feedback: %w", err)
+		}
+		return fmt.Errorf("%w: %s", ErrApprovalFeedback, feedbackText)
+	case admiral.ApprovalDecisionShelved:
+		if err := c.shelver.ShelvePlan(ctx, commissionID, strings.TrimSpace(response.FeedbackText)); err != nil {
+			return fmt.Errorf("shelve plan: %w", err)
+		}
+		return ErrApprovalShelved
+	default:
+		return fmt.Errorf("unsupported approval decision %q", response.Decision)
+	}
+}
+
+func buildApprovalRequest(
+	commissionID string,
+	manifest []Mission,
+	waves [][]Mission,
+) admiral.ApprovalRequest {
+	requestMissions := make([]admiral.Mission, 0, len(manifest))
+	coverage := make(map[string]admiral.CoverageStatus)
+	for _, mission := range manifest {
+		requestMissions = append(requestMissions, admiral.Mission{
+			ID:         mission.ID,
+			Title:      mission.Title,
+			DependsOn:  append([]string(nil), mission.DependsOn...),
+			UseCaseIDs: append([]string(nil), mission.UseCaseIDs...),
+		})
+		for _, useCaseID := range mission.UseCaseIDs {
+			useCaseID = strings.TrimSpace(useCaseID)
+			if useCaseID == "" {
+				continue
+			}
+			coverage[useCaseID] = admiral.CoverageStatusCovered
+		}
+	}
+
+	assignments := make([]admiral.Wave, 0, len(waves))
+	for i, wave := range waves {
+		missionIDs := make([]string, 0, len(wave))
+		for _, mission := range wave {
+			missionIDs = append(missionIDs, mission.ID)
+		}
+		assignments = append(assignments, admiral.Wave{
+			Index:      i + 1,
+			MissionIDs: missionIDs,
+		})
+	}
+
+	return admiral.ApprovalRequest{
+		CommissionID:    commissionID,
+		MissionManifest: requestMissions,
+		WaveAssignments: assignments,
+		CoverageMap:     coverage,
+		Iteration:       1,
+		MaxIterations:   1,
+	}
 }

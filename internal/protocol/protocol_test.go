@@ -102,15 +102,17 @@ func TestWaitForClaimFindsPersistedClaim(t *testing.T) {
 		t.Fatalf("new service: %v", err)
 	}
 
+	publishErrCh := make(chan error, 1)
 	go func() {
 		time.Sleep(40 * time.Millisecond)
-		_, _ = service.Publish(context.Background(), ProtocolEvent{
+		_, err := service.Publish(context.Background(), ProtocolEvent{
 			Type:      EventTypeAgentClaim,
 			MissionID: "mission-2",
 			ACID:      "AC-2",
 			AgentID:   "agent-99",
 			Payload:   json.RawMessage(`{"claim_type":"GREEN_COMPLETE"}`),
 		})
+		publishErrCh <- err
 	}()
 
 	found, err := service.WaitForClaim(context.Background(), "mission-2", "AC-2", ClaimTypeGREENComplete, 500*time.Millisecond)
@@ -122,6 +124,14 @@ func TestWaitForClaimFindsPersistedClaim(t *testing.T) {
 	}
 	if found.Type != EventTypeAgentClaim {
 		t.Fatalf("claim event type = %q, want %q", found.Type, EventTypeAgentClaim)
+	}
+	select {
+	case publishErr := <-publishErrCh:
+		if publishErr != nil {
+			t.Fatalf("publish protocol event: %v", publishErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for publish goroutine")
 	}
 }
 

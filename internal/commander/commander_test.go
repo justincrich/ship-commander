@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/ship-commander/sc3/internal/admiral"
 )
 
 func TestComputeWaves(t *testing.T) {
@@ -126,7 +128,7 @@ func TestCommanderExecuteSingleMissionFlow(t *testing.T) {
 	demoTokens := &fakeDemoTokenValidator{}
 	events := &fakeEventPublisher{}
 
-	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 2})
+	cmd, err := newCommanderForTest(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 2})
 	if err != nil {
 		t.Fatalf("new commander: %v", err)
 	}
@@ -152,6 +154,183 @@ func TestCommanderExecuteSingleMissionFlow(t *testing.T) {
 	}
 }
 
+func TestCommanderExecuteRequiresApprovalBeforeDispatch(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeManifestStore{
+		manifest: []Mission{
+			{
+				ID:         "m1",
+				Title:      "Mission One",
+				UseCaseIDs: []string{"UC-1"},
+			},
+		},
+		ready: [][]string{{"m1"}},
+	}
+	worktrees := &fakeWorktreeManager{paths: map[string]string{"m1": "/tmp/worktree/m1"}}
+	locks := &fakeSurfaceLocker{}
+	harness := &fakeHarness{}
+	verifier := &fakeVerifier{}
+	demoTokens := &fakeDemoTokenValidator{}
+	events := &fakeEventPublisher{}
+	approval := &fakeApprovalGate{
+		response: admiral.ApprovalResponse{Decision: admiral.ApprovalDecisionApproved},
+	}
+	feedback := &fakeFeedbackInjector{}
+	shelver := &fakePlanShelver{}
+
+	cmd, err := New(
+		store,
+		worktrees,
+		locks,
+		harness,
+		verifier,
+		demoTokens,
+		approval,
+		feedback,
+		shelver,
+		events,
+		CommanderConfig{WIPLimit: 1},
+	)
+	if err != nil {
+		t.Fatalf("new commander: %v", err)
+	}
+
+	if err := cmd.Execute(context.Background(), "commission-1"); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if approval.callCount != 1 {
+		t.Fatalf("approval calls = %d, want 1", approval.callCount)
+	}
+	if len(approval.lastRequest.MissionManifest) != 1 || approval.lastRequest.MissionManifest[0].ID != "m1" {
+		t.Fatalf("approval mission manifest = %+v, want mission m1", approval.lastRequest.MissionManifest)
+	}
+	if len(approval.lastRequest.WaveAssignments) != 1 || approval.lastRequest.WaveAssignments[0].Index != 1 {
+		t.Fatalf("approval wave assignments = %+v, want one wave", approval.lastRequest.WaveAssignments)
+	}
+	if approval.lastRequest.CoverageMap["UC-1"] != admiral.CoverageStatusCovered {
+		t.Fatalf("coverage map = %+v, expected UC-1 covered", approval.lastRequest.CoverageMap)
+	}
+	if len(worktrees.created) != 1 || worktrees.created[0] != "m1" {
+		t.Fatalf("worktrees created = %v, want [m1]", worktrees.created)
+	}
+}
+
+func TestCommanderExecuteFeedbackReconvenesPlanningWithoutDispatch(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeManifestStore{
+		manifest: []Mission{{ID: "m1", Title: "Mission One"}},
+		ready:    [][]string{{"m1"}},
+	}
+	worktrees := &fakeWorktreeManager{paths: map[string]string{"m1": "/tmp/worktree/m1"}}
+	locks := &fakeSurfaceLocker{}
+	harness := &fakeHarness{}
+	verifier := &fakeVerifier{}
+	demoTokens := &fakeDemoTokenValidator{}
+	events := &fakeEventPublisher{}
+	approval := &fakeApprovalGate{
+		response: admiral.ApprovalResponse{
+			Decision:     admiral.ApprovalDecisionFeedback,
+			FeedbackText: "split mission into backend and tui slices",
+		},
+	}
+	feedback := &fakeFeedbackInjector{}
+	shelver := &fakePlanShelver{}
+
+	cmd, err := New(
+		store,
+		worktrees,
+		locks,
+		harness,
+		verifier,
+		demoTokens,
+		approval,
+		feedback,
+		shelver,
+		events,
+		CommanderConfig{WIPLimit: 1},
+	)
+	if err != nil {
+		t.Fatalf("new commander: %v", err)
+	}
+
+	err = cmd.Execute(context.Background(), "commission-1")
+	if !errors.Is(err, ErrApprovalFeedback) {
+		t.Fatalf("execute error = %v, want ErrApprovalFeedback", err)
+	}
+	if feedback.callCount != 1 {
+		t.Fatalf("feedback injector calls = %d, want 1", feedback.callCount)
+	}
+	if feedback.lastFeedback != "split mission into backend and tui slices" {
+		t.Fatalf("feedback text = %q", feedback.lastFeedback)
+	}
+	if len(worktrees.created) != 0 {
+		t.Fatalf("worktrees created = %v, want none when feedback requested", worktrees.created)
+	}
+	if shelver.callCount != 0 {
+		t.Fatalf("shelver calls = %d, want 0", shelver.callCount)
+	}
+}
+
+func TestCommanderExecuteShelvePersistsPlanWithoutDispatch(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeManifestStore{
+		manifest: []Mission{{ID: "m1", Title: "Mission One"}},
+		ready:    [][]string{{"m1"}},
+	}
+	worktrees := &fakeWorktreeManager{paths: map[string]string{"m1": "/tmp/worktree/m1"}}
+	locks := &fakeSurfaceLocker{}
+	harness := &fakeHarness{}
+	verifier := &fakeVerifier{}
+	demoTokens := &fakeDemoTokenValidator{}
+	events := &fakeEventPublisher{}
+	approval := &fakeApprovalGate{
+		response: admiral.ApprovalResponse{
+			Decision:     admiral.ApprovalDecisionShelved,
+			FeedbackText: "hold until dependencies land",
+		},
+	}
+	feedback := &fakeFeedbackInjector{}
+	shelver := &fakePlanShelver{}
+
+	cmd, err := New(
+		store,
+		worktrees,
+		locks,
+		harness,
+		verifier,
+		demoTokens,
+		approval,
+		feedback,
+		shelver,
+		events,
+		CommanderConfig{WIPLimit: 1},
+	)
+	if err != nil {
+		t.Fatalf("new commander: %v", err)
+	}
+
+	err = cmd.Execute(context.Background(), "commission-1")
+	if !errors.Is(err, ErrApprovalShelved) {
+		t.Fatalf("execute error = %v, want ErrApprovalShelved", err)
+	}
+	if shelver.callCount != 1 {
+		t.Fatalf("shelver calls = %d, want 1", shelver.callCount)
+	}
+	if shelver.lastFeedback != "hold until dependencies land" {
+		t.Fatalf("shelve feedback text = %q", shelver.lastFeedback)
+	}
+	if len(worktrees.created) != 0 {
+		t.Fatalf("worktrees created = %v, want none when shelved", worktrees.created)
+	}
+	if feedback.callCount != 0 {
+		t.Fatalf("feedback injector calls = %d, want 0", feedback.callCount)
+	}
+}
+
 func TestCommanderExecutePublishesHaltedOnVerifyFailure(t *testing.T) {
 	t.Parallel()
 
@@ -166,7 +345,7 @@ func TestCommanderExecutePublishesHaltedOnVerifyFailure(t *testing.T) {
 	demoTokens := &fakeDemoTokenValidator{}
 	events := &fakeEventPublisher{}
 
-	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
+	cmd, err := newCommanderForTest(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
 	if err != nil {
 		t.Fatalf("new commander: %v", err)
 	}
@@ -216,7 +395,7 @@ func TestCommanderExecuteEnforcesWIPLimit(t *testing.T) {
 	demoTokens := &fakeDemoTokenValidator{}
 	events := &fakeEventPublisher{}
 
-	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 2})
+	cmd, err := newCommanderForTest(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 2})
 	if err != nil {
 		t.Fatalf("new commander: %v", err)
 	}
@@ -259,7 +438,7 @@ func TestCommanderExecuteUsesDependencyOrderAcrossWaves(t *testing.T) {
 	demoTokens := &fakeDemoTokenValidator{}
 	events := &fakeEventPublisher{}
 
-	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 2})
+	cmd, err := newCommanderForTest(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 2})
 	if err != nil {
 		t.Fatalf("new commander: %v", err)
 	}
@@ -290,7 +469,7 @@ func TestCommanderExecuteStandardOpsUsesVerifyImplementAndDemoToken(t *testing.T
 	demoTokens := &fakeDemoTokenValidator{}
 	events := &fakeEventPublisher{}
 
-	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
+	cmd, err := newCommanderForTest(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
 	if err != nil {
 		t.Fatalf("new commander: %v", err)
 	}
@@ -324,7 +503,7 @@ func TestCommanderExecuteStandardOpsHaltsOnVerifyImplementFailure(t *testing.T) 
 	demoTokens := &fakeDemoTokenValidator{}
 	events := &fakeEventPublisher{}
 
-	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
+	cmd, err := newCommanderForTest(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
 	if err != nil {
 		t.Fatalf("new commander: %v", err)
 	}
@@ -354,7 +533,7 @@ func TestCommanderExecuteStandardOpsHaltsOnDemoTokenFailure(t *testing.T) {
 	demoTokens := &fakeDemoTokenValidator{err: errors.New("demo token invalid")}
 	events := &fakeEventPublisher{}
 
-	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
+	cmd, err := newCommanderForTest(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
 	if err != nil {
 		t.Fatalf("new commander: %v", err)
 	}
@@ -390,7 +569,7 @@ func TestCommanderExecuteHaltsBeforeDispatchWhenRevisionLimitReached(t *testing.
 	demoTokens := &fakeDemoTokenValidator{}
 	events := &fakeEventPublisher{}
 
-	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
+	cmd, err := newCommanderForTest(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
 	if err != nil {
 		t.Fatalf("new commander: %v", err)
 	}
@@ -427,7 +606,7 @@ func TestCommanderExecuteHaltsBeforeDispatchWhenACAttemptsExhausted(t *testing.T
 	demoTokens := &fakeDemoTokenValidator{}
 	events := &fakeEventPublisher{}
 
-	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
+	cmd, err := newCommanderForTest(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
 	if err != nil {
 		t.Fatalf("new commander: %v", err)
 	}
@@ -464,7 +643,7 @@ func TestCommanderExecuteStandardOpsHaltsOnMissingDemoToken(t *testing.T) {
 	demoTokens := &fakeDemoTokenValidator{err: os.ErrNotExist}
 	events := &fakeEventPublisher{}
 
-	cmd, err := New(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
+	cmd, err := newCommanderForTest(store, worktrees, locks, harness, verifier, demoTokens, events, CommanderConfig{WIPLimit: 1})
 	if err != nil {
 		t.Fatalf("new commander: %v", err)
 	}
@@ -492,6 +671,33 @@ type fakeManifestStore struct {
 	readManifestCalls int
 	readyCalls        int
 	mu                sync.Mutex
+}
+
+func newCommanderForTest(
+	store ManifestStore,
+	worktrees WorktreeManager,
+	locks SurfaceLocker,
+	harness Harness,
+	verifier Verifier,
+	demoTokens DemoTokenValidator,
+	events EventPublisher,
+	cfg CommanderConfig,
+) (*Commander, error) {
+	return New(
+		store,
+		worktrees,
+		locks,
+		harness,
+		verifier,
+		demoTokens,
+		&fakeApprovalGate{
+			response: admiral.ApprovalResponse{Decision: admiral.ApprovalDecisionApproved},
+		},
+		&fakeFeedbackInjector{},
+		&fakePlanShelver{},
+		events,
+		cfg,
+	)
 }
 
 func (f *fakeManifestStore) ReadApprovedManifest(_ context.Context, _ string) ([]Mission, error) {
@@ -619,6 +825,65 @@ type fakeDemoTokenValidator struct {
 	err   error
 	calls int
 	mu    sync.Mutex
+}
+
+type fakeApprovalGate struct {
+	response    admiral.ApprovalResponse
+	err         error
+	callCount   int
+	lastRequest admiral.ApprovalRequest
+	mu          sync.Mutex
+}
+
+func (f *fakeApprovalGate) AwaitDecision(
+	_ context.Context,
+	request admiral.ApprovalRequest,
+) (admiral.ApprovalResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.callCount++
+	f.lastRequest = request
+	if f.err != nil {
+		return admiral.ApprovalResponse{}, f.err
+	}
+	return f.response, nil
+}
+
+type fakeFeedbackInjector struct {
+	callCount    int
+	lastCID      string
+	lastFeedback string
+	err          error
+	mu           sync.Mutex
+}
+
+func (f *fakeFeedbackInjector) InjectPlanningFeedback(_ context.Context, commissionID, feedbackText string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.callCount++
+	f.lastCID = commissionID
+	f.lastFeedback = feedbackText
+	return f.err
+}
+
+type fakePlanShelver struct {
+	callCount    int
+	lastCID      string
+	lastFeedback string
+	err          error
+	mu           sync.Mutex
+}
+
+func (f *fakePlanShelver) ShelvePlan(_ context.Context, commissionID, feedbackText string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.callCount++
+	f.lastCID = commissionID
+	f.lastFeedback = feedbackText
+	return f.err
 }
 
 func (f *fakeDemoTokenValidator) Validate(_ context.Context, _ Mission, _ string) error {

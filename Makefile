@@ -7,6 +7,10 @@ MAIN_PATH=./cmd/root
 BUILD_DIR=./build
 COVERAGE_FILE=coverage.out
 COVERAGE_HTML=coverage.html
+GO_BIN_PATH=$(shell if [ -n "$$(go env GOBIN)" ]; then printf "%s" "$$(go env GOBIN)"; else printf "%s/bin" "$$(go env GOPATH)"; fi)
+GOLANGCI_LINT=$(GO_BIN_PATH)/golangci-lint
+
+export PATH := $(PATH):$(GO_BIN_PATH)
 
 # Go build flags
 LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)"
@@ -106,12 +110,12 @@ benchmark: ## Run benchmarks
 .PHONY: lint
 lint: ## Run golangci-lint
 	@echo "$(COLOR_GREEN)🔍 Running linters...$(COLOR_RESET)"
-	@golangci-lint run --timeout=5m
+	@$(GOLANGCI_LINT) run --timeout=5m
 
 .PHONY: lint-fast
 lint-fast: ## Run linters with fast checks only
 	@echo "$(COLOR_GREEN)🔍 Running linters (fast)...$(COLOR_RESET)"
-	@golangci-lint run --fast --timeout=2m
+	@$(GOLANGCI_LINT) run --fast --timeout=2m
 
 .PHONY: fmt
 fmt: ## Format code with goimports and gofmt

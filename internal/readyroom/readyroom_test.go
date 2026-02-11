@@ -266,6 +266,7 @@ func TestPlanReturnsErrorForUnknownMessageRecipient(t *testing.T) {
 	}
 }
 
+//nolint:gocyclo // Comprehensive end-to-end behavior test for question suspension and answer routing.
 func TestPlanSuspendsOnQuestionPublishesEventAndRoutesAnswer(t *testing.T) {
 	t.Parallel()
 
@@ -416,10 +417,11 @@ func TestPlanBroadcastsAdmiralAnswerWhenRequested(t *testing.T) {
 	}
 
 	room := newReadyRoomForTest(t, factory, 1)
+	answerErrCh := make(chan error, 1)
 
 	go func() {
 		question := <-room.QuestionGate().Questions()
-		_ = room.QuestionGate().SubmitAnswer(admiral.AdmiralAnswer{
+		answerErrCh <- room.QuestionGate().SubmitAnswer(admiral.AdmiralAnswer{
 			QuestionID: question.QuestionID,
 			SkipFlag:   true,
 			Broadcast:  true,
@@ -461,6 +463,14 @@ func TestPlanBroadcastsAdmiralAnswerWhenRequested(t *testing.T) {
 	}
 	if !result.QuestionLog[0].Answer.Broadcast {
 		t.Fatal("expected broadcast flag to be preserved")
+	}
+	select {
+	case submitErr := <-answerErrCh:
+		if submitErr != nil {
+			t.Fatalf("submit answer: %v", submitErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for answer submission")
 	}
 }
 

@@ -116,7 +116,20 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 }
 
 func (b *limitedBuffer) WriteString(s string) {
-	_, _ = b.Write([]byte(s))
+	if s == "" {
+		return
+	}
+	remaining := b.max - len(b.data)
+	if remaining > 0 {
+		if len(s) <= remaining {
+			b.data = append(b.data, s...)
+		} else {
+			b.data = append(b.data, s[:remaining]...)
+			b.truncated = true
+		}
+		return
+	}
+	b.truncated = true
 }
 
 func (b *limitedBuffer) String() string {

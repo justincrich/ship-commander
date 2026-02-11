@@ -139,6 +139,7 @@ func TestRunVerifyGREENRunsInfraThreeTimesAndRejectsFlaky(t *testing.T) {
 		t.Fatalf("classification = %q, want %q", result.Classification, ClassificationRejectFailure)
 	}
 
+	// #nosec G304 -- infraCounterFile is created from t.TempDir() within this test.
 	countRaw, err := os.ReadFile(infraCounterFile)
 	if err != nil {
 		t.Fatalf("read infra count file: %v", err)
@@ -178,6 +179,7 @@ func TestRunVerifyIMPLEMENTSequentialAndAutoPass(t *testing.T) {
 			t.Fatalf("classification = %q, want %q", result.Classification, ClassificationRejectFailure)
 		}
 
+		// #nosec G304 -- logFile is created from t.TempDir() within this test.
 		content, err := os.ReadFile(logFile)
 		if err != nil {
 			t.Fatalf("read log file: %v", err)
@@ -345,6 +347,7 @@ func TestRunUsesMissionCommandsAndVariableSubstitution(t *testing.T) {
 		t.Fatalf("classification = %q, want %q", result.Classification, ClassificationAccept)
 	}
 
+	// #nosec G304 -- outFile is created from t.TempDir() within this test.
 	raw, err := os.ReadFile(outFile)
 	if err != nil {
 		t.Fatalf("read substitution file: %v", err)
