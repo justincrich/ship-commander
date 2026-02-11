@@ -2,7 +2,7 @@
 
 ## ⚠️ MANDATORY READING BEFORE WRITING TESTS
 
-**ALL agents MUST read**: `.spec/GO-TESTING-GUIDELINES.md`
+**ALL agents MUST read**: `TESTING.md` (root directory)
 
 This document contains:
 - **5 Test Integrity Rules** - Prevent vanity/self-validating tests
