@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SC3 TUI - Onboarding Overlay Mockup</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #1a1a2e;
+      font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+      font-size: 13px;
+      line-height: 1.4;
+      color: #F5F6FA;
+      padding: 40px 20px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    .terminal-window {
+      width: 100%;
+      max-width: 1100px;
+      border-radius: 8px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      overflow: hidden;
+    }
+
+    .terminal-titlebar {
+      background: #2D2D2D;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      border-radius: 8px 8px 0 0;
+    }
+
+    .terminal-buttons {
+      display: flex;
+      gap: 8px;
+    }
+
+    .terminal-button {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .terminal-button.red { background: #FF5F56; }
+    .terminal-button.yellow { background: #FFBD2E; }
+    .terminal-button.green { background: #27C93F; }
+
+    .terminal-title {
+      flex: 1;
+      text-align: center;
+      font-size: 12px;
+      color: #999;
+      margin-right: 52px;
+    }
+
+    .terminal-body {
+      background: #000000;
+      padding: 20px;
+      border-radius: 0 0 8px 8px;
+      position: relative;
+      min-height: 600px;
+    }
+
+    /* Fleet Overview Background (dimmed) */
+    .fleet-overview {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      opacity: 0.2;
+    }
+
+    .fleet-header {
+      color: #9999CC;
+      font-weight: bold;
+      font-size: 16px;
+      margin-bottom: 20px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #52526A;
+    }
+
+    .fleet-content {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    .panel {
+      border: 1px solid #52526A;
+      border-radius: 4px;
+      padding: 12px;
+    }
+
+    .panel-title {
+      color: #FF9966;
+      font-weight: bold;
+      margin-bottom: 8px;
+      font-size: 12px;
+    }
+
+    .ship-item {
+      color: #F5F6FA;
+      padding: 4px 0;
+      border-left: 2px solid #9999CC;
+      padding-left: 8px;
+      margin: 4px 0;
+    }
+
+    .ship-item .ship-name {
+      font-weight: bold;
+    }
+
+    .ship-item .ship-status {
+      color: #52526A;
+      font-size: 11px;
+    }
+
+    .toolbar {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      right: 20px;
+      border: 1px solid #52526A;
+      border-radius: 4px;
+      padding: 8px 12px;
+      color: #52526A;
+      font-size: 11px;
+    }
+
+    /* Highlighted Panel */
+    .panel.highlighted {
+      position: absolute;
+      top: 80px;
+      left: 40px;
+      width: 360px;
+      opacity: 1 !important;
+      border: 2px solid #FFAA00;
+      box-shadow:
+        0 0 20px rgba(255, 170, 0, 0.4),
+        0 0 40px rgba(255, 170, 0, 0.2);
+      animation: pulseGlow 2s ease-in-out infinite;
+      background: rgba(0, 0, 0, 0.85);
+    }
+
+    @keyframes pulseGlow {
+      0%, 100% {
+        box-shadow:
+          0 0 20px rgba(255, 170, 0, 0.4),
+          0 0 40px rgba(255, 170, 0, 0.2);
+      }
+      50% {
+        box-shadow:
+          0 0 30px rgba(255, 170, 0, 0.6),
+          0 0 60px rgba(255, 170, 0, 0.3);
+      }
+    }
+
+    /* Tooltip Card */
+    .tooltip-card {
+      position: absolute;
+      top: 80px;
+      left: 440px;
+      width: 520px;
+      background: rgba(0, 0, 0, 0.95);
+      border: 2px solid #FF9966;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7);
+      z-index: 100;
+      animation: tooltipBounce 0.4s ease-out;
+    }
+
+    @keyframes tooltipBounce {
+      0% {
+        opacity: 0;
+        transform: scale(0.9) translateY(-10px);
+      }
+      60% {
+        transform: scale(1.02) translateY(0);
+      }
+      100% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
+    }
+
+    .tooltip-card::before {
+      content: '';
+      position: absolute;
+      top: 40px;
+      left: -10px;
+      width: 0;
+      height: 0;
+      border-top: 10px solid transparent;
+      border-bottom: 10px solid transparent;
+      border-right: 10px solid #FF9966;
+    }
+
+    .tooltip-card::after {
+      content: '';
+      position: absolute;
+      top: 42px;
+      left: -6px;
+      width: 0;
+      height: 0;
+      border-top: 8px solid transparent;
+      border-bottom: 8px solid transparent;
+      border-right: 8px solid rgba(0, 0, 0, 0.95);
+    }
+
+    .step-indicator {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #52526A;
+    }
+
+    .step-text {
+      color: #FF9966;
+      font-weight: bold;
+      font-size: 12px;
+    }
+
+    .step-dots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .step-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #52526A;
+    }
+
+    .step-dot.active {
+      background: #33FF33;
+      box-shadow: 0 0 8px rgba(51, 255, 51, 0.5);
+    }
+
+    .tooltip-content {
+      margin-bottom: 20px;
+    }
+
+    .tooltip-title {
+      color: #FF9966;
+      font-weight: bold;
+      font-size: 15px;
+      margin-bottom: 12px;
+    }
+
+    .tooltip-text {
+      color: #F5F6FA;
+      line-height: 1.6;
+      font-size: 13px;
+    }
+
+    .tooltip-navigation {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 12px;
+      border-top: 1px solid #52526A;
+    }
+
+    .nav-hint {
+      color: #CCCCCC;
+      font-size: 11px;
+    }
+
+    .nav-key {
+      background: #1B4F8F;
+      color: #F5F6FA;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-weight: bold;
+      margin: 0 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="terminal-window">
+    <div class="terminal-titlebar">
+      <div class="terminal-buttons">
+        <div class="terminal-button red"></div>
+        <div class="terminal-button yellow"></div>
+        <div class="terminal-button green"></div>
+      </div>
+      <div class="terminal-title">sc3 tui</div>
+    </div>
+    <div class="terminal-body">
+      <!-- Fleet Overview Background (dimmed) -->
+      <div class="fleet-overview">
+        <div class="fleet-header">╔═══════════════════════════════════════╗<br>║         FLEET OVERVIEW                ║<br>╚═══════════════════════════════════════╝</div>
+
+        <div class="fleet-content">
+          <div class="panel">
+            <div class="panel-title">╭─ STATUS ─╮</div>
+            <div style="color: #52526A; padding: 4px 0;">
+              Active Ships: 3<br>
+              Total Missions: 12<br>
+              In Progress: 4
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">╭─ RECENT ACTIVITY ─╮</div>
+            <div style="color: #52526A; padding: 4px 0; font-size: 11px;">
+              Mission completed: feat/auth<br>
+              Ship commissioned: raven-ui<br>
+              Agent deployed: ensign-002
+            </div>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          [Tab] Navigate  [Enter] Select  [?] Help  [Q] Quit
+        </div>
+      </div>
+
+      <!-- Highlighted Panel: Your Fleet -->
+      <div class="panel highlighted">
+        <div class="panel-title">╭─ YOUR FLEET ─╮</div>
+        <div class="ship-item">
+          <div class="ship-name">▸ USS ENTERPRISE</div>
+          <div class="ship-status">  Active • 5 missions • 3 agents</div>
+        </div>
+        <div class="ship-item">
+          <div class="ship-name">  USS VOYAGER</div>
+          <div class="ship-status">  Idle • 4 missions • 2 agents</div>
+        </div>
+        <div class="ship-item">
+          <div class="ship-name">  USS DEFIANT</div>
+          <div class="ship-status">  Active • 3 missions • 4 agents</div>
+        </div>
+      </div>
+
+      <!-- Tooltip Card -->
+      <div class="tooltip-card">
+        <div class="step-indicator">
+          <span class="step-text">Step 1 of 5</span>
+          <div class="step-dots">
+            <div class="step-dot active"></div>
+            <div class="step-dot"></div>
+            <div class="step-dot"></div>
+            <div class="step-dot"></div>
+            <div class="step-dot"></div>
+          </div>
+        </div>
+
+        <div class="tooltip-content">
+          <div class="tooltip-title">Your Fleet</div>
+          <div class="tooltip-text">
+            This is your fleet — each ship represents a project commission with its own crew and missions. Press Enter to drill into any ship.
+          </div>
+        </div>
+
+        <div class="tooltip-navigation">
+          <span class="nav-hint"><span class="nav-key">Enter</span> Next</span>
+          <span class="nav-hint"><span class="nav-key">Esc</span> Skip Tour</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

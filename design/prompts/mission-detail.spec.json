@@ -1,0 +1,90 @@
+{
+  "design_key": "mission-detail",
+  "name": "Mission Detail",
+  "version": "2.0",
+  "description": "Full-screen drill-down for a single mission. Shows mission spec, AC list with full TDD phase pipelines, gate evidence, demo token preview, and available actions.",
+  "screen": {
+    "type": "drill-down",
+    "parent": "ship-bridge",
+    "children": [],
+    "mode_availability": { "basic": true, "advanced": true, "executive": true },
+    "mode_differences": {
+      "basic": ["Gate evidence shows summary only (pass/fail counts)", "Demo token shows validation status only, not full content", "AC list shows current phase only (not full pipeline)"],
+      "advanced": ["Full gate evidence table with output snippets", "Demo token rendered via Glamour with full content", "AC list shows complete 6-dot pipeline with inline gate results"],
+      "executive": ["Mission summary only: status, progress percentage, gate pass rate", "No AC-level detail unless drilled further"]
+    }
+  },
+  "layout": {
+    "structure": "MissionHeader | ACPhaseDetail (40%) + GateEvidence (30%) + DemoToken (30%) | NavigableToolbar",
+    "rows": [
+      { "name": "mission-header", "height": 4, "panels": [
+        { "id": "mission-header-panel", "width": "100%", "description": "Mission ID, title, classification badge (RED_ALERT or STANDARD_OPS), wave number, status, revision count, assigned agent, ship name, use-case refs." }
+      ]},
+      { "name": "content", "height": "fill", "panels": [
+        { "id": "ac-phase-detail", "width": "40%", "description": "Scrollable AC list with full TDD phase pipelines. Each row: AC index, 6-dot pipeline colored by phase (RED->VERIFY_RED->GREEN->VERIFY_GREEN->REFACTOR->VERIFY_REFACTOR). Active phase butterscotch (pulsing). Complete green_ok. Failed red_alert. Upcoming dim. Inline gate results per phase. Attempt counts if > 1." },
+        { "id": "gate-evidence", "width": "30%", "description": "Gate results table sorted newest-first. Columns: timestamp, gate type, AC, exit code, classification. Color-coded rows: green for pass, red for fail." },
+        { "id": "demo-token-preview", "width": "30%", "description": "Glamour-rendered demo token if present, or placeholder 'Demo token not yet produced.' Shows validation status badge." }
+      ]},
+      { "name": "toolbar", "height": 1, "panels": [
+        { "id": "navigable-toolbar", "width": "100%", "description": "Context-sensitive NavigableToolbar. In-progress: [h] Halt [?] Help [Esc] Bridge. Halted: [r] Retry [?] Help [Esc] Bridge. Review: [a] Approve [f] Reject [?] Help [Esc] Bridge. Done: [w] Worktree [?] Help [Esc] Bridge." }
+      ]}
+    ],
+    "responsive": {
+      "standard": { "min_width": 120, "description": "Three-column content: AC phases + gate evidence + demo token" },
+      "compact": { "threshold": "<120 cols", "description": "Stacked: AC list full width + tabbed gate/demo panels below" }
+    }
+  },
+  "components": [
+    { "name": "MissionDetailHeader", "charm_base": "lipgloss.JoinHorizontal + lipgloss.NewStyle()", "tokens_used": ["butterscotch", "blue", "red_alert", "green_ok", "purple", "space_white", "light_gray"], "variants": ["standard_ops", "red_alert", "halted", "done"] },
+    { "name": "ACPhaseDetail", "charm_base": "lipgloss.NewStyle() + bubbles.list", "tokens_used": ["butterscotch", "green_ok", "red_alert", "galaxy_gray", "space_white", "moonlit_violet", "blue"], "variants": ["default", "compact"] },
+    { "name": "PhaseIndicator", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["butterscotch", "green_ok", "red_alert", "galaxy_gray", "space_white"], "variants": ["full", "compact"] },
+    { "name": "GateEvidenceTable", "charm_base": "bubbles.table", "tokens_used": ["green_ok", "red_alert", "butterscotch", "galaxy_gray", "space_white", "blue"], "variants": ["default", "compact"] },
+    { "name": "Viewport", "charm_base": "bubbles.viewport + glamour.Render", "tokens_used": ["butterscotch", "space_white", "light_gray", "galaxy_gray"], "variants": ["demo_token", "placeholder"] },
+    { "name": "StatusBadge", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["butterscotch", "green_ok", "blue", "galaxy_gray", "red_alert"], "variants": ["in_progress", "review", "done", "halted"] },
+    { "name": "NavigableToolbar", "charm_base": "lipgloss.JoinHorizontal + bubbles.key", "tokens_used": ["butterscotch", "moonlit_violet", "galaxy_gray", "space_white"], "variants": ["in_progress", "halted", "review", "done"] }
+  ],
+  "data_sources": [
+    { "source": "mission_instance", "description": "Full mission state including classification, wave, agent, status" },
+    { "source": "ac_phases", "description": "Per-AC TDD phase state with 6-phase pipeline" },
+    { "source": "gate_evidence", "description": "All gate results for this mission" },
+    { "source": "demo_token", "description": "Demo token content if produced" }
+  ],
+  "keyboard": {
+    "global": { "Tab": "Cycle focus: ac-phase-detail -> gate-evidence -> demo-token -> navigable-toolbar", "Shift+Tab": "Reverse focus cycle", "?": "Help", "q": "Quit" },
+    "view_specific": { "Up/Down": "Navigate AC list or gate evidence", "Enter": "Expand selected AC or gate result", "h": "Halt mission (in-progress)", "r": "Retry mission (halted)", "a": "Approve (review)", "f": "Reject with feedback (review)", "Escape": "Return to Ship Bridge" },
+    "toolbar_buttons_in_progress": [
+      { "key": "h", "label": "Halt", "action": "Halt mission" },
+      { "key": "?", "label": "Help", "action": "Help overlay" },
+      { "key": "Esc", "label": "Bridge", "action": "Return to Ship Bridge" }
+    ],
+    "toolbar_buttons_halted": [
+      { "key": "r", "label": "Retry", "action": "Retry mission" },
+      { "key": "?", "label": "Help", "action": "Help overlay" },
+      { "key": "Esc", "label": "Bridge", "action": "Return to Ship Bridge" }
+    ],
+    "toolbar_buttons_review": [
+      { "key": "a", "label": "Approve", "action": "Approve mission" },
+      { "key": "f", "label": "Reject", "action": "Reject with feedback" },
+      { "key": "?", "label": "Help", "action": "Help overlay" },
+      { "key": "Esc", "label": "Bridge", "action": "Return to Ship Bridge" }
+    ],
+    "toolbar_buttons_done": [
+      { "key": "w", "label": "Worktree", "action": "Open worktree" },
+      { "key": "?", "label": "Help", "action": "Help overlay" },
+      { "key": "Esc", "label": "Bridge", "action": "Return to Ship Bridge" }
+    ]
+  },
+  "transitions": [
+    { "to": "ship-bridge", "trigger": "Escape", "type": "pop", "animation": { "preset": "view_switch", "direction": "slide-left" } }
+  ],
+  "special_behavior": [
+    { "trigger": "Gate failure on active AC", "behavior": "Failed phase dot turns red_alert. Gate evidence table scrolls to show failure. Error details highlighted." },
+    { "trigger": "All ACs complete", "behavior": "Mission status transitions to review. Green_ok animation across all phase dots. Toolbar switches to review actions." },
+    { "trigger": "Demo token produced", "behavior": "Demo token viewport renders content via Glamour. Validation status badge appears." }
+  ],
+  "tokens": {
+    "colors": { "primary": "butterscotch", "accent": "blue" },
+    "borders": { "default": "lipgloss.RoundedBorder() in blue", "focused": "lipgloss.RoundedBorder() in moonlit_violet" },
+    "icons": { "phase_complete": "\u2713", "phase_active": "\u25B8", "phase_failed": "\u2717", "phase_pending": "\u25CB" }
+  }
+}

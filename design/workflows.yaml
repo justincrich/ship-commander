@@ -1,0 +1,651 @@
+# Ship Commander 3 -- User Workflows (Revised Mental Model)
+# End-to-end task flows spanning multiple screens and interactions
+# Each workflow represents a complete user journey from goal to outcome
+#
+# REVISED MENTAL MODEL:
+#   The Admiral manages a fleet. Workflows center on: building the fleet,
+#   creating directives, planning missions, launching ships, monitoring
+#   execution, and handling communications.
+#
+# Personas:
+#   staff-commander  -- Senior developer, power user, full LCARS experience
+#   junior-lieutenant -- Novice user, learning the system, needs guidance
+#   fleet-admiral    -- Manager/architect, executive overview, minimal detail
+
+version: "2.0"
+created: "2026-02-10"
+project: ship-commander-3
+
+personas:
+  - id: staff-commander
+    name: Staff Commander
+    description: >
+      Senior developer or tech lead comfortable with CLI tools. Uses Ship Commander
+      daily to orchestrate complex features across multiple ships. Expects full
+      LCARS aesthetic, real-time monitoring, keyboard-driven navigation, and deep
+      drill-down capability. Manages multiple ships simultaneously.
+    goals:
+      - "Orchestrate complex features across multiple ships without losing visibility"
+      - "Maintain control over agent output (inspect, halt, retry) per ship"
+      - "Parallelize work across ships and within ships"
+      - "Debug agent failures quickly when things go wrong"
+      - "Ship faster through fleet-level automation while maintaining quality"
+
+  - id: junior-lieutenant
+    name: Junior Lieutenant
+    description: >
+      Junior to mid-level developer learning the system. Needs clear guidance,
+      safe defaults, and progressive disclosure. Starts with a single ship
+      and grows to managing a small fleet.
+    goals:
+      - "Commission first ship and launch a simple directive without confusion"
+      - "Understand the ship/directive/crew/mission hierarchy"
+      - "Get help when stuck (clear errors, contextual help)"
+      - "Build confidence through successful missions"
+
+  - id: fleet-admiral
+    name: Fleet Admiral
+    description: >
+      Engineering manager or architect overseeing multiple projects. Wants
+      fleet-wide metrics, batch operations, and minimal detail. Drills down
+      only when something needs attention across any ship.
+    goals:
+      - "Track progress across all ships without micromanaging"
+      - "Identify blockers quickly across the fleet"
+      - "Batch-approve completed waves efficiently"
+      - "Ensure quality via gate pass rates fleet-wide"
+
+workflows:
+
+  # ---------------------------------------------------------------------------
+  # WORKFLOW 1: Fleet Setup (First Ship)
+  # ---------------------------------------------------------------------------
+  - id: fleet-setup
+    name: Fleet Setup (First Ship)
+    description: >
+      The Admiral sets up their fleet from scratch: creates agents in the roster,
+      commissions their first ship, assigns a crew, creates a directive, and
+      prepares for launch. This is the complete onboarding workflow.
+    persona: junior-lieutenant
+    trigger: "Admiral launches 'sc3 tui' for the first time (empty fleet)"
+    success_criteria: >
+      The Admiral has a commissioned ship with a crew (at minimum Captain +
+      Commander) and an assigned directive, ready for planning and launch.
+    failure_modes:
+      - "Admiral quits before completing setup"
+      - "No harness available (no claude or codex on PATH)"
+      - "PRD file not found or unparseable"
+    steps:
+      - screen: fleet-overview
+        action: >
+          Empty fleet state. The welcome message appears: "Your fleet is empty.
+          Press [n] to commission your first starship." with a butterscotch
+          call-to-action. The header shows "FLEET COMMAND" with zero ships.
+        duration_hint: "Instant"
+        emotion: "Curiosity -- the journey begins"
+
+      - screen: fleet-overview (ship-commissioning modal)
+        action: >
+          Admiral presses 'n'. The Ship Commissioning modal opens. They enter
+          a ship name (e.g., "USS Discovery") and optionally select a ship
+          class. On submit, the ship card appears in the fleet list with
+          DOCKED status and "No Directive" label.
+        duration_hint: "30 seconds"
+        emotion: "Delight -- naming a starship is fun"
+
+      - screen: agent-roster
+        action: >
+          Admiral presses 'r' to open the Agent Roster. Empty roster state:
+          "Your roster is empty. Press [n] to recruit your first crew member."
+          Admiral creates at least two agents: a Captain and a Commander.
+          For each agent they fill in: name, role, skills, model, mission prompt.
+          Optional: age, backstory for flavor.
+        duration_hint: "2-5 minutes"
+        emotion: "Investment -- building the crew"
+
+      - screen: agent-roster
+        action: >
+          Admiral assigns the Captain and Commander to their ship. Presses 'a'
+          on each agent, selects the ship from the dropdown. The agent's
+          assignment field updates to show the ship name.
+        duration_hint: "30 seconds"
+        emotion: "Satisfaction -- the crew is assembled"
+
+      - screen: fleet-overview
+        action: >
+          Admiral returns to Fleet Overview. The ship card now shows "Crew: 2"
+          with role badges (Captain + Commander). Still shows "No Directive."
+          Admiral presses 'd' to create a directive.
+        duration_hint: "10 seconds"
+        emotion: "Progress -- building toward launch"
+
+      - screen: directive-editor
+        action: >
+          Directive Editor opens. Admiral provides a path to a PRD markdown
+          file. The file loads and renders in the preview panel. The parsed
+          structure shows extracted use cases and acceptance criteria. Admiral
+          assigns the directive to their ship and saves.
+        duration_hint: "1-3 minutes"
+        emotion: "Preparation -- the mission is defined"
+
+      - screen: fleet-overview
+        action: >
+          Back on Fleet Overview. The ship card now shows the directive title
+          in blue, crew count, and status "DOCKED -- Ready to plan." The
+          Admiral can proceed to planning.
+        duration_hint: "Instant"
+        emotion: "Readiness -- everything is in place"
+
+  # ---------------------------------------------------------------------------
+  # WORKFLOW 2: Directive Planning
+  # ---------------------------------------------------------------------------
+  - id: directive-planning
+    name: Directive Planning
+    description: >
+      The Admiral enters the Ready Room with their ship's crew to plan how
+      the directive will be decomposed into missions. The Captain and Commander
+      collaboratively analyze the PRD, the Admiral answers questions, and
+      ultimately the plan is approved for launch.
+    persona: staff-commander
+    trigger: "Admiral presses 'p' on a ship with an assigned directive from Fleet Overview or Ship Bridge"
+    success_criteria: >
+      The directive is decomposed into a sequenced mission manifest with full
+      use-case coverage, three-way sign-off (Captain + Commander + any
+      specialists), and Admiral approval. The ship is ready to launch.
+    failure_modes:
+      - "Max planning iterations (5) exceeded without consensus"
+      - "Admiral shelves the plan"
+      - "Agent session crashes during planning"
+    steps:
+      - screen: ship-bridge
+        action: >
+          Admiral views the Ship Bridge for their docked ship. The crew panel
+          shows idle agents. The mission board shows "No missions yet. Press
+          [p] to plan." Admiral presses 'p'.
+        duration_hint: "5 seconds"
+        emotion: "Initiation -- entering the Ready Room"
+
+      - screen: ready-room
+        action: >
+          The Ready Room opens with the ship name and directive title in the
+          header. The directive sidebar shows the PRD content rendered via
+          Glamour. The crew session grid begins spawning agent sessions:
+          Captain (functional analysis), Commander (mission decomposition),
+          and any specialists (Design Officer if assigned).
+        duration_hint: "10-30 seconds (session spawn)"
+        emotion: "Engagement -- watching the crew assemble around the table"
+
+      - screen: ready-room
+        action: >
+          Crew sessions produce output. Each panel shows real-time progress:
+          status (working), elapsed time, output summary. The Captain identifies
+          functional requirements. The Commander drafts the mission manifest.
+          Specialists review their domains. Coverage matrix begins filling in.
+        duration_hint: "1-5 minutes per iteration"
+        emotion: "Confidence -- the crew is working together"
+
+      - screen: ready-room (admiral-question-modal)
+        action: >
+          A crew member surfaces a question to the Admiral. The question modal
+          identifies the asking crew member by name: "ADMIRAL -- QUESTION FROM
+          Captain Picard." The Admiral reads the question, selects an option
+          or types free text, and submits. Planning resumes.
+        duration_hint: "30 seconds - 2 minutes"
+        emotion: "Engagement -- the Admiral's input is valued"
+        conditional: "Only if a crew member produces a question"
+
+      - screen: ready-room
+        action: >
+          Planning reaches consensus. All crew members have signed off.
+          The toolbar highlights [v] Review Plan. The TUI automatically
+          navigates to the Plan Review view.
+        duration_hint: "30 seconds"
+        emotion: "Anticipation -- the plan is ready"
+
+      - screen: plan-review
+        action: >
+          The Plan Review view (full-screen drill-down) shows the mission
+          manifest rendered via Glamour, the coverage matrix with per-use-case
+          status, and the dependency graph with wave groupings. The navigable
+          toolbar shows: [a] Approve  [f] Feedback  [s] Shelve. The Admiral
+          reviews and selects an action via shortcut key or arrow + Enter.
+        duration_hint: "2-10 minutes"
+        emotion: "Validation (approve) / Deliberation (feedback) / Deferral (shelve)"
+
+      - screen: ship-bridge
+        action: >
+          On approval, the TUI returns to the Ship Bridge. The mission board
+          now shows missions in the Backlog column. A prominent indicator:
+          "Plan approved. Ready to launch. Press [l] to engage."
+        duration_hint: "Instant"
+        emotion: "Accomplishment -- the plan is set"
+
+  # ---------------------------------------------------------------------------
+  # WORKFLOW 3: Ship Launch and Monitoring
+  # ---------------------------------------------------------------------------
+  - id: ship-launch-and-monitoring
+    name: Ship Launch and Monitoring
+    description: >
+      The Admiral launches a ship with an approved plan and monitors execution
+      from the Ship Bridge. The Commander dispatches agents to missions, TDD
+      phases progress, gates pass or fail, and waves advance. The Admiral
+      intervenes only when necessary.
+    persona: staff-commander
+    trigger: "Admiral presses 'l' on a Ship Bridge with an approved plan"
+    success_criteria: >
+      The ship completes all missions in its directive with valid demo tokens,
+      all gates pass, and the Admiral has clear visibility throughout.
+    failure_modes:
+      - "Agent gets stuck (Doctor detects timeout)"
+      - "Gate fails repeatedly (mission halted)"
+      - "Demo token validation fails"
+    steps:
+      - screen: ship-bridge
+        action: >
+          Admiral presses 'l' on the Ship Bridge. The launch confirmation
+          modal appears: "LAUNCH SEQUENCE -- USS Discovery." Shows directive
+          title, mission count (12), wave count (3), crew complement (4).
+          "Engage?" Admiral confirms.
+        duration_hint: "10 seconds"
+        emotion: "Excitement -- launching the ship"
+
+      - screen: ship-bridge
+        action: >
+          Ship status transitions to LAUNCHED. The bridge view transforms:
+          crew panel shows agents activating, mission board populates with
+          missions moving from Backlog to In Progress, the header wave
+          summary initializes showing "Wave 1 of N". The Commander begins
+          dispatching Wave 1.
+        duration_hint: "15-30 seconds"
+        emotion: "Command -- the ship is underway"
+
+      - screen: ship-bridge
+        action: >
+          Real-time monitoring. Crew cards update with current missions and
+          TDD phases. Mission board column counts shift as missions progress.
+          Event log streams activity. For detailed phase tracking, the Admiral
+          drills into a mission via Enter to see the full 6-dot AC pipeline
+          in Mission Detail. Wave progress is summarized in the header.
+        duration_hint: "Continuous (minutes to hours)"
+        emotion: "Engagement -- watching the crew execute"
+
+      - screen: ship-bridge (admiral-question-modal)
+        action: >
+          A crew member asks a question during execution. The modal overlays
+          the bridge, identifying the asking agent by name and role. The
+          Admiral responds. Execution continues.
+        duration_hint: "30 seconds - 2 minutes"
+        emotion: "Authority -- the Admiral guides the crew"
+        conditional: "Only if questions arise"
+
+      - screen: ship-bridge
+        action: >
+          Wave 1 completes. Wave progress bar turns green_ok. Event log shows
+          completion. The Commander automatically dispatches Wave 2 if no
+          merge conflicts. The Admiral can optionally open the wave manager
+          with 'w' to review and batch-merge.
+        duration_hint: "Automatic"
+        emotion: "Momentum -- progress is tangible"
+
+      - screen: ship-bridge (agent-detail, optional)
+        action: >
+          Admiral optionally drills into a crew member to inspect their output,
+          or into a mission to review gate evidence and demo tokens. Escape
+          returns to the bridge.
+        duration_hint: "1-5 minutes"
+        emotion: "Curiosity -- checking on the details"
+        conditional: "Only if Admiral chooses to drill down"
+
+      - screen: ship-bridge
+        action: >
+          All missions complete. Ship status transitions to COMPLETE with
+          green_ok animation. Summary: "USS Discovery -- Directive complete.
+          12/12 missions done. 0 halted." The Admiral can review demo tokens
+          or return to Fleet Overview.
+        duration_hint: "Instant"
+        emotion: "Accomplishment -- mission accomplished"
+
+  # ---------------------------------------------------------------------------
+  # WORKFLOW 4: Multi-Ship Fleet Management
+  # ---------------------------------------------------------------------------
+  - id: multi-ship-management
+    name: Multi-Ship Fleet Management
+    description: >
+      The Admiral manages multiple launched ships simultaneously. They monitor
+      fleet-wide progress from the Fleet Overview, jump between Ship Bridges
+      to handle issues, and use the Message Center to stay on top of
+      communications from all crews.
+    persona: fleet-admiral
+    trigger: "Admiral has 2+ launched ships and switches between them"
+    success_criteria: >
+      The Admiral can track progress across all ships, respond to questions
+      from any crew, handle stuck agents on any ship, and batch-merge
+      completed waves -- all without losing context.
+    failure_modes:
+      - "Admiral misses a critical question from a ship they are not viewing"
+      - "Stuck agent on one ship goes unnoticed while monitoring another"
+    steps:
+      - screen: fleet-overview
+        action: >
+          Fleet Overview shows multiple ships: USS Discovery (LAUNCHED, 60%),
+          USS Defiant (LAUNCHED, 25%), USS Reliant (DOCKED -- planning).
+          Each card shows real-time progress, crew status, and notification
+          badges. The fleet summary bar shows aggregate metrics.
+        duration_hint: "10-30 seconds scan"
+        emotion: "Oversight -- the fleet at a glance"
+
+      - screen: fleet-overview
+        action: >
+          The Admiral notices USS Defiant has a yellow_caution stuck indicator
+          and USS Discovery has a pink question badge. They prioritize: first
+          answer the question (press 'i' for Message Center), then address
+          the stuck agent.
+        duration_hint: "5 seconds"
+        emotion: "Triage -- handling what matters first"
+
+      - screen: message-center
+        action: >
+          Message Center shows: 1 pending question from Captain Kirk on USS
+          Discovery, 1 stuck alert from USS Defiant. Admiral selects the
+          question, reads it, responds via the inline form. The question
+          is resolved.
+        duration_hint: "1-2 minutes"
+        emotion: "Responsiveness -- the Admiral is engaged"
+
+      - screen: message-center
+        action: >
+          Admiral selects the stuck alert from USS Defiant. Presses 'g' to
+          go to the Ship Bridge for USS Defiant.
+        duration_hint: "5 seconds"
+        emotion: "Action -- addressing the issue"
+
+      - screen: ship-bridge (USS Defiant)
+        action: >
+          On USS Defiant's bridge, the Admiral sees the stuck agent in the
+          crew panel with yellow_caution highlight. Drills in with Enter,
+          reviews the output, determines the agent is genuinely stuck, and
+          presses 'r' to retry the mission with a fresh agent.
+        duration_hint: "2-5 minutes"
+        emotion: "Resolution -- the blockage is cleared"
+
+      - screen: fleet-overview
+        action: >
+          Admiral returns to Fleet Overview. USS Discovery's question badge
+          is gone. USS Defiant's stuck indicator clears as the new agent
+          starts. All ships show healthy progress.
+        duration_hint: "Instant"
+        emotion: "Control -- the fleet is running smoothly"
+
+  # ---------------------------------------------------------------------------
+  # WORKFLOW 5: Stuck Agent Recovery
+  # ---------------------------------------------------------------------------
+  - id: stuck-agent-recovery
+    name: Stuck Agent Recovery
+    description: >
+      The Doctor process detects a stuck agent on a ship. The Admiral is
+      notified (via badge on Fleet Overview or alert in Message Center),
+      navigates to the Ship Bridge, diagnoses the issue, and takes action.
+    persona: staff-commander
+    trigger: "Doctor emits doctor.stuck_detected event for an agent"
+    success_criteria: >
+      The stuck agent is recovered: retried, halted, or timeout extended.
+    failure_modes:
+      - "Agent is truly deadlocked and retry also fails"
+      - "Mission reaches max revisions after retry"
+    steps:
+      - screen: fleet-overview
+        action: >
+          A yellow_caution badge appears on the affected ship's card.
+          If the Admiral is on the Ship Bridge, the crew panel updates
+          directly. If in Message Center, an alert message appears.
+        duration_hint: "Automatic"
+        emotion: "Alert -- something needs attention"
+
+      - screen: ship-bridge
+        action: >
+          Admiral navigates to the ship. The stuck agent's card in the crew
+          panel shows yellow_caution border and "STUCK" badge. The event log
+          shows the doctor.stuck event with timeout details.
+        duration_hint: "10-30 seconds"
+        emotion: "Concern -- investigating"
+
+      - screen: agent-detail
+        action: >
+          Admiral drills into the stuck agent. Reviews recent output in the
+          viewport, error context panel (last gate failure, timeout, last
+          meaningful output). Decides: halt (h), retry (r), or ignore (i)
+          to extend timeout.
+        duration_hint: "1-3 minutes"
+        emotion: "Diagnosis -- understanding root cause"
+
+      - screen: ship-bridge
+        action: >
+          After action, the bridge updates. If retried: new agent appears.
+          If halted: mission moves to Halted column. Event log records the
+          action. The yellow_caution indicator clears.
+        duration_hint: "10 seconds"
+        emotion: "Relief -- the situation is handled"
+
+  # ---------------------------------------------------------------------------
+  # WORKFLOW 6: Wave Completion and Merge
+  # ---------------------------------------------------------------------------
+  - id: wave-completion-merge
+    name: Wave Completion and Merge
+    description: >
+      All missions in a wave on a ship reach completion. The Admiral reviews
+      results, checks for conflicts, and batch-merges. Scoped to one ship.
+    persona: staff-commander
+    trigger: "Wave completion event on a ship"
+    success_criteria: >
+      Conflict-free missions merged. Post-merge gates pass. Next wave starts.
+    failure_modes:
+      - "Merge conflicts between missions"
+      - "Post-merge gates fail"
+    steps:
+      - screen: ship-bridge
+        action: >
+          Wave progress bar for the completed wave turns green_ok. Event log:
+          "Wave N complete: M missions ready for merge." The wave indicator
+          pulses to draw attention.
+        duration_hint: "Automatic"
+        emotion: "Milestone -- a wave has finished"
+
+      - screen: ship-bridge (wave-manager overlay)
+        action: >
+          Admiral presses 'w'. The wave manager overlay shows wave progress,
+          per-mission status, conflict detection, and merge controls.
+        duration_hint: "1-3 minutes review"
+        emotion: "Review -- checking the batch"
+
+      - screen: ship-bridge (wave-manager overlay)
+        action: >
+          Admiral presses 'm' to batch-merge. Confirmation dialog. Sequential
+          merge with progress. Post-merge verification gates.
+        duration_hint: "30 seconds - 2 minutes"
+        emotion: "Execution -- shipping the batch"
+
+      - screen: ship-bridge
+        action: >
+          Wave manager closes. Commander dispatches next wave. The cycle
+          continues. Fleet Overview ship card updates progress.
+        duration_hint: "Automatic"
+        emotion: "Momentum -- the ship advances"
+
+  # ---------------------------------------------------------------------------
+  # WORKFLOW 7: First-Time Onboarding
+  # ---------------------------------------------------------------------------
+  - id: first-time-onboarding
+    name: First-Time Onboarding
+    description: >
+      A Junior Lieutenant launches the TUI for the first time. A brief
+      tour explains the fleet management concept, key screens, and
+      navigation. After the tour, they set up their first ship.
+    persona: junior-lieutenant
+    trigger: "First launch of 'sc3 tui' when no prior state exists"
+    success_criteria: >
+      The user understands the fleet model (ships, crews, directives, missions),
+      can navigate between views, and knows how to ask for help.
+    failure_modes:
+      - "User quits before completing tour"
+      - "User is overwhelmed"
+    steps:
+      - screen: onboarding-overlay
+        action: >
+          Welcome overlay: "Welcome to Ship Commander 3 -- Fleet Command."
+          Brief description: "You are the Admiral. You command a fleet of
+          AI-powered starships. Each ship has a crew of agents that execute
+          missions to fulfill your directives." Press Enter to tour or
+          Escape to skip.
+        duration_hint: "10 seconds"
+        emotion: "Curiosity -- entering the world"
+
+      - screen: onboarding-overlay
+        action: >
+          Step 1: "Fleet Overview -- Your command center." Explains: "This
+          is where you see all your ships. Each ship has a crew, a directive,
+          and missions. Ships can be docked (setup), launched (executing),
+          or complete."
+        duration_hint: "15 seconds"
+        emotion: "Learning -- building the mental model"
+
+      - screen: onboarding-overlay
+        action: >
+          Step 2: "Ships and Crews." Explains: "Commission ships with [n].
+          Build your agent roster with [r]. Assign crews to ships. Each
+          ship needs at least a Captain and a Commander."
+        duration_hint: "15 seconds"
+        emotion: "Understanding -- the hierarchy clicks"
+
+      - screen: onboarding-overlay
+        action: >
+          Step 3: "Directives and Missions." Explains: "Create directives
+          (PRDs) with [d] and assign them to ships. Plan missions in the
+          Ready Room with [p]. Launch ships with [l]."
+        duration_hint: "15 seconds"
+        emotion: "Clarity -- the workflow is clear"
+
+      - screen: onboarding-overlay
+        action: >
+          Step 4: "Navigation." Explains: "Tab moves between panels. Enter
+          drills in. Escape goes back. ? shows help anytime. That is all
+          you need." Press Enter to begin.
+        duration_hint: "15 seconds"
+        emotion: "Readiness -- time to command"
+
+      - screen: fleet-overview
+        action: >
+          Onboarding closes. Empty Fleet Overview with the "Press [n] to
+          commission your first starship" call-to-action. The user begins
+          the Fleet Setup workflow.
+        duration_hint: "Continuous"
+        emotion: "Confidence -- guided but empowered"
+
+  # ---------------------------------------------------------------------------
+  # WORKFLOW 8: Agent Roster Management
+  # ---------------------------------------------------------------------------
+  - id: roster-management
+    name: Agent Roster Management
+    description: >
+      The Admiral maintains their roster of agents: creating new agents with
+      full profiles, editing existing agents, reassigning agents between
+      ships, and retiring agents no longer needed.
+    persona: staff-commander
+    trigger: "Admiral presses 'r' from Fleet Overview"
+    success_criteria: >
+      The Admiral has a well-organized roster with agents properly configured
+      (valid models, appropriate skills) and assigned to the right ships.
+    failure_modes:
+      - "Model not available on configured harness"
+      - "Agent assigned to a launched ship cannot be reassigned"
+    steps:
+      - screen: agent-roster
+        action: >
+          Agent Roster opens showing all agents organized by role. The
+          left sidebar shows role categories with counts. The center list
+          shows agents filtered by selected category. The right panel
+          shows the selected agent's full profile.
+        duration_hint: "Instant"
+        emotion: "Organization -- seeing the whole crew"
+
+      - screen: agent-roster
+        action: >
+          Admiral creates a new agent: presses 'n', fills in the profile
+          form (name, role, skills, model, mission prompt). The model
+          field validates against the configured harness. Skills use slash
+          notation. The new agent appears in the roster as "Unassigned."
+        duration_hint: "1-3 minutes per agent"
+        emotion: "Investment -- crafting the crew member"
+
+      - screen: agent-roster
+        action: >
+          Admiral edits an existing agent: selects the agent, presses Enter,
+          modifies fields (e.g., updating skills or mission prompt), saves.
+          The profile updates. If the agent is currently active on a mission,
+          changes take effect on the next mission dispatch.
+        duration_hint: "30 seconds - 2 minutes"
+        emotion: "Refinement -- tuning the crew"
+
+      - screen: agent-roster
+        action: >
+          Admiral assigns an agent to a ship: selects agent, presses 'a',
+          picks the target ship from the dropdown. The agent's assignment
+          updates. If detaching from a ship: presses 'd', confirms.
+        duration_hint: "15 seconds"
+        emotion: "Deployment -- placing crew where needed"
+
+      - screen: fleet-overview
+        action: >
+          Admiral returns to Fleet Overview. Ship cards reflect updated crew
+          counts. Ready to continue managing the fleet.
+        duration_hint: "Instant"
+        emotion: "Satisfaction -- the roster is in order"
+
+  # ---------------------------------------------------------------------------
+  # WORKFLOW 9: Message-Driven Fleet Management
+  # ---------------------------------------------------------------------------
+  - id: message-driven-management
+    name: Message-Driven Fleet Management
+    description: >
+      The Admiral uses the Message Center as their primary interface for
+      staying on top of fleet activity. They check messages periodically,
+      respond to questions, handle alerts, and navigate to ships as needed.
+    persona: fleet-admiral
+    trigger: "Admiral sees notification badge on Fleet Overview or checks Message Center periodically"
+    success_criteria: >
+      All pending questions answered, all alerts addressed, no unread
+      messages older than 5 minutes.
+    failure_modes:
+      - "Message flood from multiple ships overwhelms the inbox"
+      - "Critical alert buried under low-priority notifications"
+    steps:
+      - screen: fleet-overview
+        action: >
+          The header shows "Messages: 5" with a pink notification badge.
+          Admiral presses 'i' to open Message Center.
+        duration_hint: "5 seconds"
+        emotion: "Awareness -- messages await"
+
+      - screen: message-center
+        action: >
+          Inbox shows: 2 questions (pink, top priority), 1 alert (red),
+          2 notifications (blue). Admiral filters to questions first (press
+          '1'). Reads and responds to each question. Messages move to
+          "Answered" section.
+        duration_hint: "2-5 minutes"
+        emotion: "Responsiveness -- the crew gets answers"
+
+      - screen: message-center
+        action: >
+          Admiral filters to alerts (press '2'). Sees a halted mission alert.
+          Presses 'g' to go to the source ship's bridge. Addresses the issue.
+          Returns to Message Center.
+        duration_hint: "3-5 minutes"
+        emotion: "Resolution -- problems handled"
+
+      - screen: message-center
+        action: >
+          Admiral reviews remaining notifications. Wave completions, mission
+          progress updates. Dismisses read notifications with 'd'. Returns
+          to Fleet Overview with a clean inbox.
+        duration_hint: "1-2 minutes"
+        emotion: "Order -- everything is accounted for"

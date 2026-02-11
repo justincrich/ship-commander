@@ -1,0 +1,83 @@
+{
+  "design_key": "wave-manager",
+  "name": "Wave Manager",
+  "version": "2.0",
+  "description": "Overlay for reviewing wave execution and batch-merging completed missions. Shows all waves with progress, per-mission status, conflict detection, and merge controls.",
+  "screen": {
+    "type": "overlay",
+    "parent": "ship-bridge",
+    "children": [],
+    "mode_availability": { "basic": false, "advanced": true, "executive": true },
+    "mode_differences": {
+      "advanced": ["Full per-mission detail with conflict file lists", "Post-merge verification gate results shown inline"],
+      "executive": ["Wave summary with batch merge controls only", "Per-mission detail available on drill-down"]
+    }
+  },
+  "layout": {
+    "structure": "WaveHeader | WaveList (30%) + WaveMissionDetail (70%) | NavigableToolbar",
+    "overlay": {
+      "width": "95%",
+      "height": "90%",
+      "position": "centered",
+      "background": "dimmed underlying view",
+      "animation": {
+        "open": "modal_open (freq=6.0, ratio=0.8) -- slides in with bounce",
+        "close": "modal_close (freq=10.0, ratio=1.0) -- crisp slide out"
+      }
+    },
+    "rows": [
+      { "name": "wave-header", "height": 2, "panels": [
+        { "id": "wave-header-panel", "width": "100%", "description": "'WAVE MANAGER -- <Ship Name>' in bold butterscotch. Overall: 'N/M waves complete, P missions merged.'" }
+      ]},
+      { "name": "content", "height": "80%", "panels": [
+        { "id": "wave-list", "width": "30%", "description": "Wave list with progress bars and mission counts. Each wave shows: wave number, progress bar (butterscotch->green), done/total count. Selected wave highlighted moonlit_violet." },
+        { "id": "wave-mission-detail", "width": "70%", "description": "Missions in selected wave with status, gate results, conflict indicators, merge readiness. Each mission row: ID, title, status badge, conflict icon (if any), merge checkbox." }
+      ]},
+      { "name": "toolbar", "height": 1, "panels": [
+        { "id": "navigable-toolbar", "width": "100%", "description": "NavigableToolbar: [m] Merge Ready  [c] Merge w/Conflicts  [?] Help  [Esc] Close. Each button selectable via shortcut key OR arrow + Enter." }
+      ]}
+    ],
+    "responsive": {
+      "standard": { "min_width": 120, "description": "Two-column: wave list + mission detail side by side" },
+      "compact": { "threshold": "<120 cols", "description": "Single column: wave list with inline progress, Enter to see missions" }
+    }
+  },
+  "components": [
+    { "name": "ModalOverlay", "charm_base": "lipgloss.Place + lipgloss.NewStyle().Border(lipgloss.DoubleBorder())", "tokens_used": ["gold", "space_white", "bg_modal"], "variants": ["standard"] },
+    { "name": "WaveProgressBar", "charm_base": "bubbles.progress", "tokens_used": ["butterscotch", "gold", "green_ok", "galaxy_gray"], "variants": ["active", "complete", "pending"] },
+    { "name": "WaveListItem", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["butterscotch", "green_ok", "galaxy_gray", "moonlit_violet", "space_white"], "variants": ["active", "complete", "pending"] },
+    { "name": "MissionCard", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["blue", "red_alert", "butterscotch", "green_ok", "moonlit_violet"], "variants": ["standard_ops", "red_alert", "merge_ready", "has_conflicts"] },
+    { "name": "ConflictIndicator", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["yellow_caution", "red_alert", "space_white"], "variants": ["none", "minor", "major"] },
+    { "name": "ConfirmDialog", "charm_base": "huh.Confirm", "tokens_used": ["gold", "red_alert", "space_white"], "variants": ["standard", "destructive"] },
+    { "name": "MergeProgressBar", "charm_base": "bubbles.progress", "tokens_used": ["butterscotch", "green_ok", "galaxy_gray"], "variants": ["merging", "complete"] },
+    { "name": "NavigableToolbar", "charm_base": "lipgloss.JoinHorizontal + bubbles.key", "tokens_used": ["butterscotch", "moonlit_violet", "galaxy_gray", "space_white"], "variants": ["default", "navigating"] }
+  ],
+  "data_sources": [
+    { "source": "wave_assignments", "description": "Waves for current ship's directive with mission assignments" },
+    { "source": "mission_states", "description": "Per-mission status and merge readiness" },
+    { "source": "conflict_detection", "description": "Git conflict analysis between mission worktrees" }
+  ],
+  "keyboard": {
+    "global": { "Tab": "Cycle: wave-list -> mission-detail -> navigable-toolbar", "?": "Help", "q": "Quit" },
+    "view_specific": { "Up/Down": "Navigate wave or mission list", "Enter": "Select wave / drill into mission", "m": "Batch merge ready missions (with confirmation)", "c": "Merge with conflicts (manual resolution)", "Escape": "Close wave manager" },
+    "toolbar_buttons": [
+      { "key": "m", "label": "Merge Ready", "action": "Batch merge all ready missions" },
+      { "key": "c", "label": "Merge Conflicts", "action": "Merge missions with conflicts" },
+      { "key": "?", "label": "Help", "action": "Help overlay" },
+      { "key": "Esc", "label": "Close", "action": "Close wave manager" }
+    ]
+  },
+  "transitions": [
+    { "to": "ship-bridge", "trigger": "Escape", "type": "overlay_close", "animation": { "preset": "modal_close" } }
+  ],
+  "special_behavior": [
+    { "trigger": "Wave complete, all missions ready", "behavior": "Merge Ready button highlighted in green_ok. Wave progress bar shows solid green." },
+    { "trigger": "Conflict detected between missions", "behavior": "Conflict indicator shows yellow_caution or red_alert. Affected files listed inline." },
+    { "trigger": "Merge in progress", "behavior": "MergeProgressBar shows sequential merge progress. Post-merge gates run automatically." }
+  ],
+  "tokens": {
+    "colors": { "primary": "butterscotch", "accent": "gold" },
+    "borders": { "default": "lipgloss.DoubleBorder() in gold", "focused": "lipgloss.DoubleBorder() in moonlit_violet" },
+    "icons": { "wave_active": "\u25B8", "wave_complete": "\u2713", "wave_pending": "\u25CB", "conflict": "\u26A0", "merge_ready": "\u2713" }
+  }
+}

@@ -1,0 +1,934 @@
+# Ship Commander 3 -- Interaction Flows (Revised Mental Model)
+# Micro-level user interactions within the Bubble Tea TUI
+# Each flow defines a discrete interaction pattern with trigger, steps, and exit conditions
+#
+# REVISED MENTAL MODEL:
+#   The Admiral manages a fleet of starships. Ships are groupings of agents (crews)
+#   that execute missions. Directives (PRDs) are assigned to ships. The Admiral
+#   commissions ships, assigns crews, creates directives, launches ships, and
+#   monitors progress from their command terminal.
+#
+# Color tokens: butterscotch=#FF9966, blue=#9999CC, purple=#CC99CC, green_ok=#33FF33,
+#               red_alert=#FF3333, yellow_caution=#FFCC00, gold=#FFAA00, moonlit_violet=#9966FF
+# Status icons: done=checkmark, working=bullet, waiting=pause, skipped=null, failed=cross,
+#               running=play, blocked=diamond
+
+version: "2.0"
+created: "2026-02-10"
+project: ship-commander-3
+
+flows:
+
+  # ---------------------------------------------------------------------------
+  # FLOW 1: Fleet Overview Navigation
+  # ---------------------------------------------------------------------------
+  - id: fleet-overview-navigation
+    name: Fleet Overview Navigation
+    description: >
+      The Admiral's primary landing screen. Shows all commissioned ships with
+      their status, assigned directives, crew complement, and mission progress.
+      The Admiral browses their fleet and selects a ship to inspect, launch,
+      or manage.
+    trigger: "Admiral launches 'sc3 tui' or returns to Fleet Overview via Escape from any child view"
+    context: fleet-overview
+    preconditions:
+      - "TUI is active and rendering"
+      - "At least one ship has been commissioned (or the empty-fleet state is shown)"
+    steps:
+      - action: "Admiral views the Fleet Overview"
+        component: FleetOverview
+        result: >
+          The screen shows a list of commissioned ships as ShipCards arranged
+          in a scrollable list. Each ShipCard displays: ship name (bold
+          butterscotch), assigned directive title (blue), crew count, mission
+          progress bar, and ship status badge (DOCKED=galaxy_gray,
+          LAUNCHED=butterscotch, COMPLETE=green_ok, HALTED=red_alert).
+          The header bar shows "FLEET COMMAND" with total fleet stats.
+
+      - action: "Admiral navigates between ships using Up/Down arrow keys"
+        component: ShipList (bubbles/list)
+        result: >
+          The selected ship is highlighted with a moonlit_violet border.
+          A preview panel on the right (in standard layout) shows ship
+          details: directive summary, crew roster, current wave progress,
+          and recent activity log.
+
+      - action: "Admiral presses Enter on a selected ship"
+        component: ShipList
+        result: >
+          The TUI navigates to the Ship Bridge view for the selected ship.
+          The navigation stack pushes the current fleet overview state.
+          Transition uses Harmonica critically-damped spring animation.
+
+      - action: "Admiral presses 'n' to commission a new ship"
+        component: FleetOverview
+        result: >
+          The Ship Commissioning modal opens. The Admiral names their new
+          ship and optionally assigns an initial crew.
+
+      - action: "Admiral presses 'd' to create a new directive"
+        component: FleetOverview
+        result: >
+          The Directive Editor view opens for creating a new directive.
+
+      - action: "Admiral presses 'r' to open the Agent Roster"
+        component: FleetOverview
+        result: >
+          The Agent Roster view opens showing all available agents across
+          the fleet.
+
+      - action: "Admiral presses 'i' to check the Message Center"
+        component: FleetOverview
+        result: >
+          The Message Center opens showing pending questions and notifications
+          from captains and commanders across all ships.
+
+    exit_conditions:
+      - "Admiral enters a Ship Bridge view (Enter on a ship)"
+      - "Admiral opens Ship Commissioning modal (n)"
+      - "Admiral opens Directive Editor (d)"
+      - "Admiral opens Agent Roster (r)"
+      - "Admiral opens Message Center (i)"
+      - "Admiral quits (q)"
+    notes:
+      - "Ships with pending Admiral questions show a notification badge (pink pulse)"
+      - "Ships actively executing show a butterscotch status indicator with spinner"
+      - "The fleet overview updates in real-time as ships report progress"
+
+  # ---------------------------------------------------------------------------
+  # FLOW 2: Ship Commissioning
+  # ---------------------------------------------------------------------------
+  - id: ship-commissioning
+    name: Ship Commissioning
+    description: >
+      The Admiral commissions (creates) a new starship. Ships are named groupings
+      that will be assigned a crew and a directive. Commissioning is the fun,
+      thematic act of creating a new unit in the fleet.
+    trigger: "Admiral presses 'n' on Fleet Overview or runs 'sc3 ship new'"
+    context: fleet-overview
+    preconditions:
+      - "Fleet Overview is active"
+    steps:
+      - action: "Ship Commissioning modal opens"
+        component: ShipCommissioningForm (huh.Form)
+        result: >
+          A centered modal overlay appears with Harmonica under-damped spring
+          animation (ratio 0.8). The modal header reads "COMMISSION NEW STARSHIP"
+          in bold butterscotch. The form contains:
+          1. huh.Input for ship name (required, e.g., "USS Enterprise")
+          2. huh.Select for ship class (optional flavor: Explorer, Destroyer,
+             Science Vessel, etc. -- purely cosmetic)
+
+      - action: "Admiral enters ship name"
+        component: huh.Input
+        result: >
+          Name validates: must be unique across the fleet, 3-50 characters,
+          alphanumeric plus spaces and hyphens. The input field shows
+          butterscotch border when focused.
+
+      - action: "Admiral selects ship class (optional)"
+        component: huh.Select
+        result: >
+          Ship class is cosmetic flavor text displayed on ship cards.
+          Options: Explorer, Destroyer, Science Vessel, Frigate, Dreadnought.
+          Default: Explorer.
+
+      - action: "Admiral submits the form"
+        component: ShipCommissioningForm
+        result: >
+          Ship is created in Beads with status DOCKED (no directive, no crew).
+          The modal closes with Harmonica spring animation. The fleet overview
+          updates with the new ship card at the top of the list. Event log
+          records: "checkmark USS Enterprise commissioned -- ready for crew and directive"
+
+    exit_conditions:
+      - "Admiral submits the form -- ship is commissioned"
+      - "Admiral presses Escape -- commissioning cancelled"
+    notes:
+      - "A ship starts in DOCKED status with no crew and no directive"
+      - "The Admiral must assign a crew and directive before launching"
+      - "Ship names are persisted to Beads and must be unique"
+
+  # ---------------------------------------------------------------------------
+  # FLOW 3: Agent Roster Management
+  # ---------------------------------------------------------------------------
+  - id: agent-roster-management
+    name: Agent Roster Management
+    description: >
+      The Admiral manages their roster of agents. Agents have names, optional
+      backstories, skills (slash skill strings for the target harness), models,
+      and mission prompts. The roster is the Admiral's crew pool from which
+      ships draw their complement.
+    trigger: "Admiral presses 'r' on Fleet Overview or navigates to Agent Roster"
+    context: agent-roster
+    preconditions:
+      - "TUI is active"
+    steps:
+      - action: "Agent Roster view opens"
+        component: AgentRosterView
+        result: >
+          Full-screen view showing all agents organized by role type:
+          Commanders, Captains, Ensigns (specialists). Each agent is displayed
+          as an AgentProfileCard showing: name (bold), role type badge,
+          skills list, model, current assignment (ship name or "Unassigned"),
+          and status (idle/active/stuck).
+
+      - action: "Admiral browses agents using Up/Down and Tab (to switch role sections)"
+        component: AgentRosterList (bubbles/list)
+        result: >
+          The selected agent card expands to show full details: backstory
+          (if set, rendered via Glamour in faint italic), skills list with
+          slash notation, model validation status, and mission prompt preview.
+
+      - action: "Admiral presses 'n' to create a new agent"
+        component: AgentCreationForm (huh.Form)
+        result: >
+          A modal opens with the agent creation form:
+          1. huh.Input: Name (required)
+          2. huh.Select: Role type (Commander, Captain, Ensign)
+          3. huh.Input: Age (optional, cosmetic)
+          4. huh.Text: Backstory (optional, cosmetic, not used in dev work)
+          5. huh.Text: Skills (slash skill strings, e.g., "/go /testing /api-design")
+          6. huh.Select: Model (claude-sonnet, claude-opus, codex, etc.)
+          7. huh.Text: Mission Prompt (the system prompt for this agent)
+
+      - action: "Admiral presses Enter on an existing agent to edit"
+        component: AgentRosterList
+        result: >
+          The agent edit form opens pre-populated with the agent's current
+          data. The Admiral can modify any field. Changes are saved on submit.
+
+      - action: "Admiral presses 'a' to assign selected agent to a ship"
+        component: AgentAssignmentForm (huh.Select)
+        result: >
+          A modal shows available ships (those needing crew). The Admiral
+          selects a ship and the agent is assigned to that ship's crew.
+
+      - action: "Admiral presses 'd' to unassign/remove agent from current ship"
+        component: ConfirmDialog (huh.Confirm)
+        result: >
+          Confirmation dialog: "Remove <agent> from <ship>?" On confirm,
+          the agent returns to the unassigned pool.
+
+    exit_conditions:
+      - "Admiral presses Escape to return to Fleet Overview"
+      - "Admiral creates or edits an agent"
+      - "Admiral assigns or unassigns an agent"
+    notes:
+      - "Model field is validated against permissible models for the configured harness"
+      - "Skills use slash notation that maps to the target harness skill system"
+      - "Backstory is flavor text -- displayed in the roster but not injected into dev prompts"
+      - "An agent can only be assigned to one ship at a time"
+
+  # ---------------------------------------------------------------------------
+  # FLOW 4: Directive Creation and Editing
+  # ---------------------------------------------------------------------------
+  - id: directive-creation
+    name: Directive Creation and Editing
+    description: >
+      The Admiral creates directives -- these are effectively PRDs that define
+      what a ship should accomplish. Each directive is assigned to a single ship.
+      Directives contain requirements, use cases, acceptance criteria, and scope.
+    trigger: "Admiral presses 'd' on Fleet Overview or 'd' on a Ship Bridge with no directive"
+    context: directive-editor
+    preconditions:
+      - "TUI is active"
+    steps:
+      - action: "Directive Editor view opens"
+        component: DirectiveEditorView
+        result: >
+          The editor shows a two-panel layout: left panel is a file picker
+          or text editor for the directive content (Markdown PRD), right
+          panel is a live preview rendered via Glamour. The header reads
+          "DIRECTIVE EDITOR" in bold purple.
+
+      - action: "Admiral selects a PRD file to import"
+        component: huh.Input (file path) or FilePicker (bubbles/filepicker)
+        result: >
+          The Admiral provides a path to an existing Markdown PRD file.
+          The file is loaded and displayed in the preview panel. The
+          system parses use cases and acceptance criteria automatically,
+          showing a coverage summary below the preview.
+
+      - action: "Admiral reviews parsed directive structure"
+        component: DirectiveStructurePanel
+        result: >
+          Below the preview, a structured summary shows: extracted use cases
+          (with IDs), acceptance criteria per use case, scope boundaries,
+          and any parsing warnings. The Admiral can accept or edit.
+
+      - action: "Admiral assigns the directive to a ship"
+        component: huh.Select (ShipSelector)
+        result: >
+          A dropdown lists all DOCKED ships (those without an active directive).
+          The Admiral selects a target ship. The directive is linked to that
+          ship. If accessed from a Ship Bridge, the current ship is pre-selected.
+
+      - action: "Admiral submits the directive"
+        component: DirectiveEditorView
+        result: >
+          The directive is persisted to Beads as a Commission. The linked ship
+          now shows the directive title on its card. Event log records:
+          "checkmark Directive '<title>' assigned to <ship name>"
+
+    exit_conditions:
+      - "Admiral submits the directive and it is assigned to a ship"
+      - "Admiral presses Escape to cancel and return"
+    notes:
+      - "A ship can only have one active directive at a time"
+      - "Directives can be reassigned to different ships if the ship is DOCKED"
+      - "Editing an active directive requires the ship to be docked first"
+
+  # ---------------------------------------------------------------------------
+  # FLOW 5: Directive Planning (Captain's Ready Room)
+  # ---------------------------------------------------------------------------
+  - id: directive-planning
+    name: Directive Planning (Captain's Ready Room)
+    description: >
+      The Admiral enters the Captain's Ready Room with the ship's Captain,
+      Commander, and any additional crew (e.g., Design Officer) to plan how
+      the directive will be fulfilled. The crew decomposes the directive into
+      missions, and the Admiral approves the plan.
+    trigger: "Admiral presses 'p' on a Ship Bridge with an assigned directive, or selects 'Plan Directive' from ship actions"
+    context: ready-room
+    preconditions:
+      - "Ship has an assigned directive"
+      - "Ship has at least a Captain and Commander in its crew"
+      - "Ship is in DOCKED status"
+    steps:
+      - action: "Ready Room view opens for the ship"
+        component: ReadyRoomView
+        result: >
+          The view shows the ship name and directive title in the header.
+          Three (or more) crew panels show the planning agents: Captain,
+          Commander, and any specialists (Design Officer, etc.). Each panel
+          shows the agent's name, role, status, and output. The directive
+          content is shown in a sidebar rendered via Glamour.
+
+      - action: "Planning agents begin analyzing the directive"
+        component: CrewSessionGrid (SpecialistGrid variant)
+        result: >
+          Each crew member's panel transitions from dim to butterscotch as
+          their harness session starts. Captain analyzes functional requirements,
+          Commander decomposes into missions, specialists review their domains.
+          Real-time status updates show: working (bullet), elapsed time,
+          output summary.
+
+      - action: "A crew member surfaces a question to the Admiral"
+        component: AdmiralQuestionModal
+        result: >
+          The question modal overlays the Ready Room. The header identifies
+          the asking crew member by name and role. The Admiral reads the
+          question, selects from options or types free text, and submits.
+          The answer routes back to the crew member's session.
+
+      - action: "Planning reaches consensus"
+        component: PlanningConsensusIndicator
+        result: >
+          All crew members have signed off on the mission manifest. The
+          coverage matrix shows all directive use cases mapped to missions.
+          The iteration badge shows the current planning iteration. The
+          Ready Room toolbar highlights [v] Review Plan. The TUI
+          automatically navigates to the Plan Review view.
+
+      - action: "Admiral reviews and approves the plan"
+        component: PlanReviewView
+        result: >
+          The Plan Review view (full-screen drill-down from Ready Room)
+          shows the mission manifest, coverage matrix, and dependency
+          graph side by side. The navigable toolbar shows: [a] Approve
+          [f] Feedback [s] Shelve. The Admiral activates an action via
+          shortcut key or arrow + Enter. Approve readies the ship for
+          launch, Feedback pops back to Ready Room for replanning,
+          Shelve saves for later.
+
+    exit_conditions:
+      - "Admiral approves the plan -- ship is ready to launch"
+      - "Admiral provides feedback -- planning reconvenes"
+      - "Admiral shelves the plan -- saved for later"
+      - "Admiral presses Escape to return to Ship Bridge (planning pauses)"
+    notes:
+      - "Planning state persists -- the Admiral can leave and return"
+      - "Crew members are the agents assigned to the ship"
+      - "The Captain leads the planning effort; the Commander sequences missions"
+
+  # ---------------------------------------------------------------------------
+  # FLOW 6: Ship Launch
+  # ---------------------------------------------------------------------------
+  - id: ship-launch
+    name: Ship Launch
+    description: >
+      The Admiral launches a ship to pursue its directive. This transitions
+      the ship from DOCKED (with an approved plan) to LAUNCHED status and
+      begins mission execution. The Commander takes control of dispatching
+      agents to missions.
+    trigger: "Admiral presses 'l' on a Ship Bridge with an approved plan, or selects 'Launch' from ship actions"
+    context: ship-bridge
+    preconditions:
+      - "Ship has an approved mission manifest (plan has been approved)"
+      - "Ship has sufficient crew (at least Commander + one Ensign)"
+      - "Ship is in DOCKED status"
+    steps:
+      - action: "Admiral initiates launch sequence"
+        component: LaunchConfirmation (huh.Confirm)
+        result: >
+          A confirmation modal appears: "LAUNCH SEQUENCE -- <Ship Name>"
+          Shows summary: directive title, mission count, wave count, crew
+          complement. "Engage?" with Confirm/Cancel. The modal has a
+          butterscotch border with subtle Harmonica pulse animation.
+
+      - action: "Admiral confirms launch"
+        component: LaunchConfirmation
+        result: >
+          Ship status transitions to LAUNCHED. The Commander begins the
+          propulsion loop: dispatching agents to Wave 1 missions, creating
+          worktrees, acquiring surface-area locks. The Ship Bridge view
+          transitions to its active monitoring layout. Event log records:
+          "play <Ship Name> launched -- engaging directive '<directive>'"
+          A brief launch animation plays (Harmonica under-damped spring
+          on the ship status indicator).
+
+      - action: "Ship Bridge view updates to show active execution"
+        component: ShipBridgeView (active mode)
+        result: >
+          The Ship Bridge now shows: active agent cards (crew working on
+          missions), mission board with TDD phase progress, wave progress
+          bars, live event log, and the command bar. This is the execution
+          monitoring view for a single ship.
+
+    exit_conditions:
+      - "Admiral confirms launch -- ship transitions to LAUNCHED"
+      - "Admiral cancels -- ship remains DOCKED"
+    notes:
+      - "A launched ship cannot have its directive changed until it docks"
+      - "Multiple ships can be launched simultaneously"
+      - "The Admiral can leave the Ship Bridge and monitor from Fleet Overview"
+
+  # ---------------------------------------------------------------------------
+  # FLOW 7: Ship Bridge Monitoring
+  # ---------------------------------------------------------------------------
+  - id: ship-bridge-monitoring
+    name: Ship Bridge Monitoring
+    description: >
+      The Admiral monitors a launched ship from its Bridge view. This is the
+      per-ship execution dashboard showing agents, missions, TDD phases,
+      gates, waves, and events. The Admiral can intervene (halt, retry)
+      and answer crew questions.
+    trigger: "Admiral presses Enter on a launched ship in Fleet Overview, or ship is already being viewed"
+    context: ship-bridge
+    preconditions:
+      - "Ship is in LAUNCHED status"
+      - "Ship Bridge view is active for this ship"
+    steps:
+      - action: "Admiral views ship execution status"
+        component: ShipBridgeView
+        result: >
+          The bridge layout shows: header with ship name + directive +
+          health + inline wave summary, crew panel (active agents with
+          role/mission/phase/time), mission board (Kanban columns), event
+          log, and navigable toolbar. Phase tracking and wave details are
+          available by drilling into Mission Detail or Wave Manager.
+          All panels update in real-time from the event bus.
+
+      - action: "Admiral navigates panels with Tab/Shift+Tab"
+        component: FocusablePanel
+        result: >
+          Tab cycles through: crew panel, mission board, event log,
+          navigable toolbar. Focused panel gets moonlit_violet border.
+          When the toolbar is focused, Left/Right arrows highlight
+          individual buttons which can be activated with Enter.
+
+      - action: "Admiral drills into a crew member (agent)"
+        component: CrewPanel
+        result: >
+          Pressing Enter on a selected agent opens the Agent Detail view
+          showing full session output, error context, and action controls.
+
+      - action: "Admiral drills into a mission"
+        component: MissionBoard
+        result: >
+          Pressing Enter on a selected mission opens the Mission Detail view
+          showing AC list, gate evidence, demo token preview, and actions.
+
+      - action: "Admiral receives a question from a crew member"
+        component: AdmiralQuestionModal
+        result: >
+          The question modal overlays the bridge. The crew member's name
+          and role are shown. The Admiral responds and the bridge resumes.
+
+      - action: "Admiral uses the navigable toolbar"
+        component: NavigableToolbar
+        result: >
+          The toolbar shows context-sensitive shortcut buttons. The Admiral
+          can press a shortcut key directly (e.g., 'h' for Halt) or arrow
+          to a button and press Enter. Actions: halt, retry, wave manager,
+          dock, and navigation shortcuts.
+
+    exit_conditions:
+      - "Admiral presses Escape to return to Fleet Overview"
+      - "All missions complete -- ship transitions to COMPLETE"
+      - "Admiral docks the ship (pauses execution)"
+    notes:
+      - "The Ship Bridge is functionally equivalent to the old execution-dashboard"
+      - "But it is scoped to a single ship and its crew"
+      - "Multiple ship bridges can be running concurrently (the Admiral switches between them)"
+
+  # ---------------------------------------------------------------------------
+  # FLOW 8: Message Center
+  # ---------------------------------------------------------------------------
+  - id: message-center
+    name: Message Center
+    description: >
+      The Admiral checks messages from across the fleet. Messages include
+      pending questions from captains and commanders, mission completion
+      notifications, alert notifications (stuck agents, halted missions),
+      and wave completion reports.
+    trigger: "Admiral presses 'i' on Fleet Overview or any view with pending notifications"
+    context: message-center
+    preconditions:
+      - "TUI is active"
+    steps:
+      - action: "Message Center opens"
+        component: MessageCenterView
+        result: >
+          Full-screen view with a message inbox layout. Messages are
+          organized in a list sorted by priority then timestamp:
+          1. Pending Admiral questions (pink, highest priority)
+          2. Alerts (red_alert for halted, yellow_caution for stuck)
+          3. Notifications (blue for completions, purple for planning)
+          Each message shows: ship name, sender (crew member name + role),
+          subject line, timestamp, and read/unread indicator.
+
+      - action: "Admiral selects a message with Up/Down and presses Enter"
+        component: MessageList (bubbles/list)
+        result: >
+          For questions: the Admiral Question modal opens inline.
+          For alerts: the relevant ship bridge or agent detail opens.
+          For notifications: a detail panel shows the full message content
+          rendered via Glamour.
+
+      - action: "Admiral answers a pending question"
+        component: AdmiralQuestionModal
+        result: >
+          The standard question flow executes. On answer, the message
+          is marked as resolved and moves to the "Answered" section.
+
+      - action: "Admiral navigates to the source ship"
+        component: MessageDetail
+        result: >
+          Pressing 'g' (go to ship) on any message opens the Ship Bridge
+          for the source ship, allowing the Admiral to take action in context.
+
+    exit_conditions:
+      - "Admiral presses Escape to return to Fleet Overview"
+      - "Admiral navigates to a Ship Bridge from a message"
+    notes:
+      - "Unread message count is shown in the Fleet Overview header"
+      - "Questions are the highest priority and always sort to the top"
+      - "Messages persist until explicitly dismissed or resolved"
+
+  # ---------------------------------------------------------------------------
+  # FLOW 9: Panel Navigation (Global)
+  # ---------------------------------------------------------------------------
+  - id: panel-navigation
+    name: Panel Navigation
+    description: >
+      Tab/Shift+Tab cycling between focusable panels within any view.
+      Enter drills down into the focused panel's selected item. Escape pops
+      back up the navigation stack. The focused panel receives a visual border
+      highlight (moonlit_violet) and all keyboard events route to it.
+    trigger: "Admiral presses Tab, Shift+Tab, Enter, or Escape on any view"
+    context: global
+    preconditions:
+      - "A view with focusable panels is active"
+      - "At least two focusable panels are rendered"
+    steps:
+      - action: "Admiral presses Tab"
+        component: KeyboardNavigationHandler
+        result: >
+          Focus advances to the next panel in the focus ring. The newly focused
+          panel receives a moonlit_violet (#9966FF) border highlight. The
+          previously focused panel reverts to default blue (#9999CC) border.
+
+      - action: "Admiral presses Shift+Tab"
+        component: KeyboardNavigationHandler
+        result: >
+          Focus moves to the previous panel in the focus ring (reverse direction).
+
+      - action: "Admiral presses Up/Down arrow keys"
+        component: FocusedPanel (list-based)
+        result: >
+          The selected item within the focused panel changes. Selection is shown
+          via reverse-video highlight with butterscotch (#FF9966) foreground.
+
+      - action: "Admiral presses Enter on a selected item"
+        component: FocusedPanel
+        result: >
+          The current view and selection are pushed onto the navigation stack.
+          The TUI transitions to the drill-down view for the selected item.
+          Transition uses Harmonica critically-damped spring (ratio 1.0).
+
+      - action: "Admiral presses Escape"
+        component: KeyboardNavigationHandler
+        result: >
+          The navigation stack is popped. The TUI returns to the previous view
+          with the prior focus and selection state restored. If the stack is
+          empty, Escape is a no-op (does not quit the application).
+
+    exit_conditions:
+      - "Admiral navigates to a drill-down view (Enter)"
+      - "Admiral returns to a parent view (Escape)"
+      - "Admiral remains on current view with different panel focus (Tab/Shift+Tab)"
+    notes:
+      - "Focus ring is circular -- Tab from the last panel wraps to the first"
+      - "Navigation stack depth is bounded to 4 levels"
+
+  # ---------------------------------------------------------------------------
+  # FLOW 10: Command Execution
+  # ---------------------------------------------------------------------------
+  - id: command-execution
+    name: Command Execution
+    description: >
+      Admiral types a command in the CommandBar on any view that has one.
+      Commands are context-sensitive based on the active view.
+    trigger: "Admiral focuses the CommandBar panel and begins typing"
+    context: ship-bridge
+    preconditions:
+      - "A view with a CommandBar is active"
+      - "CommandBar panel is focused or Admiral presses ':' to quick-focus it"
+    steps:
+      - action: "Admiral types a command string"
+        component: CommandBar (huh.Input)
+        result: >
+          Characters appear in the input field with a blinking cursor.
+          The prompt prefix '>' is rendered in butterscotch (#FF9966).
+          Context-sensitive help text is shown below.
+
+      - action: "Admiral presses Enter to submit"
+        component: CommandBar
+        result: >
+          The command string is parsed. Valid verbs depend on context:
+          Ship Bridge: halt, retry, approve, dock, status, quit
+          Fleet Overview: launch <ship>, dock <ship>, status, quit
+          The command is added to history. The input field clears.
+
+      - action: "System executes and provides feedback"
+        component: EventLog
+        result: >
+          Success feedback appears with green_ok checkmark prefix.
+          Error feedback appears with red_alert cross prefix.
+          Destructive commands trigger a Huh Confirm dialog first.
+
+    exit_conditions:
+      - "Command executes successfully"
+      - "Command fails validation with error message"
+      - "Admiral presses Escape to defocus CommandBar"
+    notes:
+      - "Command history navigable with Up/Down arrows"
+      - "Tab completion supported for ship names, mission IDs"
+
+  # ---------------------------------------------------------------------------
+  # FLOW 11: Admiral Question Response
+  # ---------------------------------------------------------------------------
+  - id: admiral-question-response
+    name: Admiral Question Response
+    description: >
+      A crew member (agent) surfaces a question to the Admiral. The question
+      can arrive while viewing any screen. A modal overlay presents the question
+      with the crew member's identity, ship context, and response options.
+    trigger: "Agent emits an ADMIRAL_QUESTION protocol event"
+    context: any-view
+    preconditions:
+      - "TUI is active and rendering"
+      - "An agent session has produced a question"
+    steps:
+      - action: "Question event arrives"
+        component: EventBus
+        result: >
+          The TUI model receives a QuestionReceivedMsg. If the Admiral is
+          viewing the source ship's bridge, the modal opens immediately.
+          Otherwise, a notification badge appears in the header showing
+          the pending question count, and the message appears in the
+          Message Center.
+
+      - action: "Admiral reads the question"
+        component: AdmiralQuestionModal
+        result: >
+          The modal header shows "ADMIRAL -- QUESTION FROM <Agent Name>"
+          with the ship name and role badge. The question text is rendered
+          via Glamour markdown. Domain badge (functional/technical/design)
+          shown in corresponding color.
+
+      - action: "Admiral selects from options or types free text"
+        component: AdmiralQuestionForm (huh.Form)
+        result: >
+          Arrow keys navigate the option list. Free-text input available.
+          Broadcast toggle for routing answer to all crew. Submit with Enter.
+
+      - action: "Admiral submits the response"
+        component: AdmiralQuestionModal
+        result: >
+          Answer packaged as ADMIRAL_ANSWER protocol event. Modal closes.
+          Event log records the answer. Planning or execution resumes.
+
+    exit_conditions:
+      - "Admiral submits a response"
+      - "Admiral selects 'Skip' (agent proceeds with best judgment)"
+    notes:
+      - "Questions queue if multiple arrive -- shown one at a time"
+      - "Questions from the ship being viewed open modals immediately"
+      - "Questions from other ships route to the Message Center"
+
+  # ---------------------------------------------------------------------------
+  # FLOW 12: Help Overlay
+  # ---------------------------------------------------------------------------
+  - id: help-overlay
+    name: Help Overlay
+    description: >
+      Admiral presses '?' to see a context-aware help overlay showing all
+      available keybindings for the current view.
+    trigger: "Admiral presses '?' on any view"
+    context: global
+    preconditions:
+      - "TUI is active"
+      - "No modal is currently capturing input"
+    steps:
+      - action: "Admiral presses '?'"
+        component: HelpOverlay
+        result: >
+          A centered overlay renders with keybindings organized by section:
+          Global (Tab, Enter, Escape, ?, q), Current View (context-specific
+          shortcuts), and Actions (available commands).
+
+      - action: "Admiral dismisses the overlay"
+        component: HelpOverlay
+        result: >
+          Pressing '?' again or Escape closes the overlay. The underlying
+          view resumes.
+
+    exit_conditions:
+      - "Admiral presses '?' to toggle off"
+      - "Admiral presses Escape to dismiss"
+    notes:
+      - "Help content adapts to the current view context"
+      - "First-time users see a hint in the header: 'Press ? for help'"
+
+  # ---------------------------------------------------------------------------
+  # FLOW 13: Crew Assignment
+  # ---------------------------------------------------------------------------
+  - id: crew-assignment
+    name: Crew Assignment
+    description: >
+      The Admiral assigns agents from the roster to a ship's crew. This can
+      happen from the Ship Bridge (when viewing a docked ship) or from the
+      Agent Roster. A ship needs at minimum a Captain and a Commander.
+    trigger: "Admiral presses 'a' (assign crew) on a Ship Bridge or selects 'Assign to Ship' in Agent Roster"
+    context: ship-bridge or agent-roster
+    preconditions:
+      - "Ship is in DOCKED status (crew changes only when docked)"
+      - "Unassigned agents exist in the roster"
+    steps:
+      - action: "Crew Assignment modal opens"
+        component: CrewAssignmentForm (huh.Form)
+        result: >
+          A modal shows two columns: left is the ship's current crew
+          (with role badges), right is available agents from the roster
+          (filtered to unassigned). Each agent shows name, role type,
+          model, and skills summary.
+
+      - action: "Admiral selects agents to add"
+        component: huh.MultiSelect
+        result: >
+          The Admiral checks agents to assign. The form validates that
+          the minimum crew requirements are met (Captain + Commander).
+          Ensigns can be added as needed for the directive's scope.
+
+      - action: "Admiral submits assignments"
+        component: CrewAssignmentForm
+        result: >
+          Selected agents are assigned to the ship. The ship's crew
+          roster updates. Event log records each assignment.
+
+    exit_conditions:
+      - "Admiral submits crew assignments"
+      - "Admiral cancels (Escape)"
+    notes:
+      - "Crew changes require the ship to be docked"
+      - "An agent can only serve on one ship at a time"
+      - "Minimum crew: 1 Captain + 1 Commander. Ensigns are optional but recommended."
+
+  # ---------------------------------------------------------------------------
+  # FLOW 14: Wave Completion and Merge
+  # ---------------------------------------------------------------------------
+  - id: wave-completion-merge
+    name: Wave Completion and Merge
+    description: >
+      A wave completes on a ship. The Admiral reviews results, checks for
+      conflicts, and batch-merges completed missions. This flow is scoped
+      to a single ship's bridge.
+    trigger: "Wave completion event on a ship, or Admiral presses 'w' on Ship Bridge"
+    context: ship-bridge
+    preconditions:
+      - "Ship Bridge is active"
+      - "At least one wave has missions in done/approved state"
+    steps:
+      - action: "Wave completion notification"
+        component: EventLog
+        result: >
+          A highlighted event: "play Wave N complete on <Ship Name>: M missions ready"
+          The wave progress indicator pulses.
+
+      - action: "Admiral opens wave manager"
+        component: WaveManager (overlay)
+        result: >
+          Overlay shows waves with progress, per-mission status, conflict
+          detection, and batch merge controls.
+
+      - action: "Admiral batch-merges ready missions"
+        component: huh.Confirm (BatchMergeDialog)
+        result: >
+          Confirmation, sequential merge with progress, post-merge verification.
+
+      - action: "Next wave dispatches"
+        component: WaveManager
+        result: >
+          Summary displayed, Commander begins next wave. Wave manager can close.
+
+    exit_conditions:
+      - "Admiral merges and closes wave manager"
+      - "Admiral closes without merging (Escape)"
+    notes:
+      - "Scoped to the current ship -- other ships' waves are independent"
+      - "Post-merge gates run on the merged branch"
+
+  # ---------------------------------------------------------------------------
+  # FLOW 16: Project Settings Configuration
+  # ---------------------------------------------------------------------------
+  - id: project-settings-configuration
+    name: Project Settings Configuration
+    description: >
+      The Admiral configures global settings -- verification gates, crew
+      defaults, fleet defaults -- or exports/imports a settings file.
+      Settings are global (not per-project) so verification gates and
+      preferences carry across all projects.
+    trigger: "Admiral presses 's' on Fleet Overview or selects Settings in NavigableToolbar"
+    context: fleet-overview
+    preconditions:
+      - "Fleet Overview is active"
+    steps:
+      - action: "Admiral opens Project Settings"
+        component: NavigableToolbar
+        result: >
+          Project Settings view slides in. Default tab is Verification Gates.
+          Header shows "PROJECT SETTINGS" with current config file path.
+
+      - action: "Admiral configures verification gates"
+        component: SettingsTabs (Tab 1: Gates)
+        result: >
+          Scrollable list of gate commands. Each gate shows:
+            test_command:  go test ./...  [Edit] [x]
+          Admiral can:
+            - Up/Down to select a gate
+            - Enter or [Edit] to modify the bash command (opens Huh Input)
+            - [x] to delete (with Huh Confirm)
+            - [+] Add Gate Command to add a new gate
+          Variable substitution documented inline: {test_file},
+          {worktree_dir}, {mission_id}. These are raw bash commands --
+          no language-specific logic.
+
+      - action: "Admiral configures crew defaults"
+        component: SettingsTabs (Tab 2: Crew)
+        result: >
+          Huh Form with fields: default harness (Select: claude/codex),
+          default model (Select: opus/sonnet/haiku), WIP limit (Input: 1-5),
+          max revisions (Input: 1-10), stuck timeout (Input: 60-600s),
+          heartbeat interval (Input: 10-120s). Per-role overrides table
+          below the main form.
+
+      - action: "Admiral configures fleet defaults"
+        component: SettingsTabs (Tab 3: Fleet)
+        result: >
+          Huh Form with fields: ship naming convention (Select: auto/custom),
+          wave strategy (Select: sequential/parallel-max), merge policy
+          (Select: manual/auto-on-review), demo token validation (Select:
+          strict/lenient).
+
+      - action: "Admiral exports settings"
+        component: SettingsTabs (Tab 4: Export)
+        result: >
+          Huh Input for file path (default: sc3-settings.json). On Enter,
+          all settings (gates, crew, fleet) serialized to JSON. Success
+          message: "Settings exported to <path>". The JSON includes
+          everything except tasks/missions/commissions.
+
+      - action: "Admiral imports settings"
+        component: SettingsTabs (Tab 4: Import)
+        result: >
+          Huh FilePicker to select a JSON file. Preview shows what will
+          be imported in a viewport. Huh Confirm before applying.
+          On confirm, settings are loaded and all tabs refresh.
+          Success message: "Settings imported from <path>".
+
+    exit_conditions:
+      - "Admiral presses Escape to return to Fleet Overview"
+      - "Changes are saved automatically on field blur"
+    notes:
+      - "Verification gates are JUST bash commands -- works for any language"
+      - "Settings are stored globally at ~/.sc3/config.json"
+      - "Export/Import is the primary mechanism for cross-project reuse"
+      - "Tasks/missions are NOT included in export -- only configuration"
+
+# =============================================================================
+# Library References
+# =============================================================================
+# Agents implementing from this file MUST use these exact imports and APIs.
+
+references:
+  - name: bubble-tea
+    package: "github.com/charmbracelet/bubbletea"
+    version: ">=1.2.0"
+    url: "https://github.com/charmbracelet/bubbletea"
+    used_for: "Elm architecture -- all flow state managed via tea.Model Update loop"
+    relevant_apis:
+      - "tea.KeyMsg -- keyboard triggers for all flows"
+      - "tea.WindowSizeMsg -- responsive layout recalculation"
+      - "tea.Cmd / tea.Batch -- async operations (data loading, animations)"
+
+  - name: lipgloss
+    package: "github.com/charmbracelet/lipgloss"
+    version: ">=1.0.0"
+    url: "https://github.com/charmbracelet/lipgloss"
+    used_for: "Focus ring styling, panel border color changes, modal placement"
+    relevant_apis:
+      - "lipgloss.Place -- modal overlay centering"
+      - "style.BorderForeground -- focus ring color (moonlit_violet)"
+      - "style.Faint(true) -- dimmed background behind modals"
+
+  - name: huh
+    package: "github.com/charmbracelet/huh"
+    version: ">=0.6.0"
+    url: "https://github.com/charmbracelet/huh"
+    used_for: "All Admiral input flows (questions, approvals, confirmations, commands)"
+    relevant_apis:
+      - "huh.Select -- option selection in question/approval flows"
+      - "huh.Input -- command bar input, free text answers"
+      - "huh.Text -- multi-line feedback in plan approval"
+      - "huh.Confirm -- destructive action confirmation, broadcast toggle"
+      - "huh.Form -- group fields into composable tea.Model"
+
+  - name: harmonica
+    package: "github.com/charmbracelet/harmonica"
+    version: ">=0.2.0"
+    url: "https://github.com/charmbracelet/harmonica"
+    used_for: "Spring animations on flow transitions (modal open/close, view switch)"
+    relevant_apis:
+      - "harmonica.NewSpring(freq, damping) -- configured per transition type"
+
+  - name: glamour
+    package: "github.com/charmbracelet/glamour"
+    version: ">=0.8.0"
+    url: "https://github.com/charmbracelet/glamour"
+    used_for: "Markdown rendering in question context, plan review manifest"
+    relevant_apis:
+      - "glamour.Render(markdown, style)"
+      - "glamour.WithWordWrap(width)"

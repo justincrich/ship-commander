@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fleet Overview - Ship Commander 3 Mockup</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #1a1a2e;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.4;
+            padding: 40px 20px;
+            color: #F5F6FA;
+        }
+
+        .terminal-window {
+            max-width: 1100px;
+            margin: 0 auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .title-bar {
+            background: #2D2D2D;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            padding: 0 12px;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .title-bar-buttons {
+            display: flex;
+            gap: 8px;
+        }
+
+        .title-bar-button {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .button-red { background: #FF5F56; }
+        .button-yellow { background: #FFBD2E; }
+        .button-green { background: #27C93F; }
+
+        .title-bar-title {
+            flex: 1;
+            text-align: center;
+            font-size: 12px;
+            color: #999;
+            font-weight: 500;
+            margin-left: -60px;
+        }
+
+        .terminal-body {
+            background: #000000;
+            padding: 20px;
+            min-height: 600px;
+            border-radius: 0 0 8px 8px;
+        }
+
+        /* Header Bar */
+        .header-bar {
+            border: 1px solid #52526A;
+            border-radius: 4px;
+            padding: 8px 12px;
+            margin-bottom: 16px;
+        }
+
+        .header-title {
+            color: #FFAA00;
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 4px;
+        }
+
+        .header-metrics {
+            display: flex;
+            gap: 24px;
+            color: #F5F6FA;
+            font-size: 12px;
+        }
+
+        .header-metric {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .metric-label {
+            color: #CCCCCC;
+        }
+
+        .metric-value {
+            color: #F5F6FA;
+            font-weight: bold;
+        }
+
+        .badge-pink {
+            background: #FF99CC;
+            color: #000000;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-weight: bold;
+            font-size: 11px;
+        }
+
+        .health-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 4px;
+        }
+
+        .health-ok { background: #33FF33; }
+        .health-warning { background: #FFCC00; }
+        .health-alert { background: #FF3333; }
+
+        /* Main Content Layout */
+        .main-content {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .ship-list {
+            flex: 0 0 60%;
+            border: 1px solid #52526A;
+            border-radius: 4px;
+            padding: 12px;
+            position: relative;
+        }
+
+        .ship-preview {
+            flex: 0 0 calc(40% - 16px);
+            border: 1px solid #52526A;
+            border-radius: 4px;
+            padding: 12px;
+            position: relative;
+        }
+
+        .panel-label {
+            position: absolute;
+            top: -8px;
+            left: 12px;
+            background: #000000;
+            padding: 0 6px;
+            color: #52526A;
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+
+        /* Ship Cards */
+        .ship-card {
+            border: 1px solid #52526A;
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 8px;
+            transition: border-color 0.2s;
+        }
+
+        .ship-card:last-child {
+            margin-bottom: 0;
+        }
+
+        .ship-card.selected {
+            border-color: #9966FF;
+            border-width: 2px;
+            padding: 9px;
+            background: rgba(153, 102, 255, 0.05);
+        }
+
+        .ship-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .ship-name {
+            color: #FF9966;
+            font-weight: bold;
+            font-size: 13px;
+        }
+
+        .ship-class {
+            color: #52526A;
+            font-size: 11px;
+            margin-left: 8px;
+        }
+
+        .status-badge {
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: bold;
+            color: #000000;
+        }
+
+        .status-docked { background: #9999CC; }
+        .status-launched { background: #FF9966; }
+        .status-complete { background: #33FF33; }
+        .status-halted { background: #FF3333; }
+
+        .ship-directive {
+            color: #9999CC;
+            font-size: 12px;
+            margin-bottom: 6px;
+        }
+
+        .ship-directive.no-directive {
+            color: #52526A;
+        }
+
+        .ship-meta {
+            display: flex;
+            gap: 16px;
+            font-size: 11px;
+            color: #CCCCCC;
+            margin-bottom: 6px;
+        }
+
+        .progress-bar {
+            background: #52526A;
+            height: 6px;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 6px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #FF9966;
+            transition: width 0.3s;
+        }
+
+        .progress-fill.complete {
+            background: #33FF33;
+        }
+
+        /* Ship Preview Panel */
+        .preview-header {
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #52526A;
+        }
+
+        .preview-ship-name {
+            color: #FF9966;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .preview-ship-class {
+            color: #52526A;
+            font-size: 11px;
+        }
+
+        .preview-section {
+            margin-bottom: 12px;
+        }
+
+        .preview-section-title {
+            color: #FFAA00;
+            font-size: 11px;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+            font-weight: bold;
+        }
+
+        .preview-directive {
+            color: #9999CC;
+            font-size: 12px;
+            line-height: 1.5;
+            background: rgba(153, 153, 204, 0.05);
+            padding: 8px;
+            border-radius: 3px;
+            border-left: 2px solid #9999CC;
+        }
+
+        .crew-list {
+            list-style: none;
+        }
+
+        .crew-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            font-size: 12px;
+            border-bottom: 1px solid rgba(82, 82, 106, 0.3);
+        }
+
+        .crew-item:last-child {
+            border-bottom: none;
+        }
+
+        .crew-name {
+            color: #F5F6FA;
+        }
+
+        .crew-role {
+            color: #9999CC;
+            font-size: 11px;
+        }
+
+        .activity-list {
+            list-style: none;
+        }
+
+        .activity-item {
+            padding: 4px 0;
+            font-size: 11px;
+            color: #CCCCCC;
+            display: flex;
+            gap: 8px;
+        }
+
+        .activity-time {
+            color: #52526A;
+            flex-shrink: 0;
+        }
+
+        .activity-text {
+            color: #F5F6FA;
+        }
+
+        .preview-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .preview-action {
+            padding: 4px 10px;
+            border: 1px solid #FF9966;
+            border-radius: 3px;
+            color: #FF9966;
+            font-size: 11px;
+            background: transparent;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .preview-action:hover {
+            background: #FF9966;
+            color: #000000;
+        }
+
+        /* Toolbar */
+        .navigable-toolbar {
+            border: 1px solid #52526A;
+            border-radius: 4px;
+            padding: 8px 12px;
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+
+        .toolbar-button {
+            display: inline-flex;
+            gap: 4px;
+            font-size: 12px;
+        }
+
+        .toolbar-key {
+            color: #FF9966;
+            font-weight: bold;
+        }
+
+        .toolbar-label {
+            color: #F5F6FA;
+        }
+
+        .toolbar-separator {
+            color: #52526A;
+        }
+
+        /* Scrollable content */
+        .ship-list-content {
+            max-height: 440px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .ship-list-content::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .ship-list-content::-webkit-scrollbar-track {
+            background: #000000;
+        }
+
+        .ship-list-content::-webkit-scrollbar-thumb {
+            background: #52526A;
+            border-radius: 3px;
+        }
+
+        .ship-list-content::-webkit-scrollbar-thumb:hover {
+            background: #9999CC;
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal-window">
+        <div class="title-bar">
+            <div class="title-bar-buttons">
+                <div class="title-bar-button button-red"></div>
+                <div class="title-bar-button button-yellow"></div>
+                <div class="title-bar-button button-green"></div>
+            </div>
+            <div class="title-bar-title">Ship Commander 3 - Fleet Overview</div>
+        </div>
+
+        <div class="terminal-body">
+            <!-- Header Bar -->
+            <div class="header-bar">
+                <div class="header-title">╭─ FLEET COMMAND ─╮</div>
+                <div class="header-metrics">
+                    <div class="header-metric">
+                        <span class="metric-label">Ships:</span>
+                        <span class="metric-value">6</span>
+                    </div>
+                    <div class="header-metric">
+                        <span class="metric-label">Launched:</span>
+                        <span class="metric-value">3</span>
+                    </div>
+                    <div class="header-metric">
+                        <span class="metric-label">Messages:</span>
+                        <span class="badge-pink">4</span>
+                    </div>
+                    <div class="header-metric">
+                        <span class="metric-label">Fleet Health:</span>
+                        <span class="health-indicator health-ok"></span>
+                        <span class="metric-value">Optimal</span>
+                    </div>
+                    <div class="header-metric">
+                        <span class="metric-label">Completion:</span>
+                        <span class="metric-value">67%</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Content -->
+            <div class="main-content">
+                <!-- Ship List -->
+                <div class="ship-list">
+                    <div class="panel-label">Ship List</div>
+                    <div class="ship-list-content">
+                        <!-- Launched Ships -->
+                        <div class="ship-card selected">
+                            <div class="ship-card-header">
+                                <div>
+                                    <span class="ship-name">USS Enterprise</span>
+                                    <span class="ship-class">Constitution-class</span>
+                                </div>
+                                <span class="status-badge status-launched">LAUNCHED</span>
+                            </div>
+                            <div class="ship-directive">Explore strange new worlds and seek out new life</div>
+                            <div class="ship-meta">
+                                <span>⚙ Crew: 5</span>
+                                <span>🎯 Mission 3/5</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 60%;"></div>
+                            </div>
+                        </div>
+
+                        <div class="ship-card">
+                            <div class="ship-card-header">
+                                <div>
+                                    <span class="ship-name">USS Defiant</span>
+                                    <span class="ship-class">Defiant-class</span>
+                                </div>
+                                <span class="status-badge status-launched">LAUNCHED</span>
+                            </div>
+                            <div class="ship-directive">Tactical defense operations in the Gamma Quadrant</div>
+                            <div class="ship-meta">
+                                <span>⚙ Crew: 4</span>
+                                <span>🎯 Mission 7/10</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 70%;"></div>
+                            </div>
+                        </div>
+
+                        <div class="ship-card">
+                            <div class="ship-card-header">
+                                <div>
+                                    <span class="ship-name">USS Voyager</span>
+                                    <span class="ship-class">Intrepid-class</span>
+                                </div>
+                                <span class="status-badge status-launched">LAUNCHED</span>
+                            </div>
+                            <div class="ship-directive">Return journey from Delta Quadrant via sustainable routes</div>
+                            <div class="ship-meta">
+                                <span>⚙ Crew: 6</span>
+                                <span>🎯 Mission 12/20</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 60%;"></div>
+                            </div>
+                        </div>
+
+                        <!-- Docked Ships -->
+                        <div class="ship-card">
+                            <div class="ship-card-header">
+                                <div>
+                                    <span class="ship-name">USS Discovery</span>
+                                    <span class="ship-class">Crossfield-class</span>
+                                </div>
+                                <span class="status-badge status-docked">DOCKED</span>
+                            </div>
+                            <div class="ship-directive">Research and development of spore drive technology</div>
+                            <div class="ship-meta">
+                                <span>⚙ Crew: 3</span>
+                                <span>🎯 Mission 0/8</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 0%;"></div>
+                            </div>
+                        </div>
+
+                        <div class="ship-card">
+                            <div class="ship-card-header">
+                                <div>
+                                    <span class="ship-name">USS Titan</span>
+                                    <span class="ship-class">Luna-class</span>
+                                </div>
+                                <span class="status-badge status-docked">DOCKED</span>
+                            </div>
+                            <div class="ship-directive no-directive">No Directive</div>
+                            <div class="ship-meta">
+                                <span>⚙ Crew: 0</span>
+                                <span>🎯 Mission 0/0</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 0%;"></div>
+                            </div>
+                        </div>
+
+                        <!-- Complete Ships -->
+                        <div class="ship-card">
+                            <div class="ship-card-header">
+                                <div>
+                                    <span class="ship-name">USS Reliant</span>
+                                    <span class="ship-class">Miranda-class</span>
+                                </div>
+                                <span class="status-badge status-complete">COMPLETE</span>
+                            </div>
+                            <div class="ship-directive">Survey and catalog Regula I sector anomalies</div>
+                            <div class="ship-meta">
+                                <span>⚙ Crew: 4</span>
+                                <span>🎯 Mission 6/6</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill complete" style="width: 100%;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Ship Preview -->
+                <div class="ship-preview">
+                    <div class="panel-label">Ship Preview</div>
+
+                    <div class="preview-header">
+                        <div class="preview-ship-name">USS Enterprise</div>
+                        <div class="preview-ship-class">Constitution-class • LAUNCHED</div>
+                    </div>
+
+                    <div class="preview-section">
+                        <div class="preview-section-title">Directive</div>
+                        <div class="preview-directive">
+                            Explore strange new worlds and seek out new life and new civilizations. Document all encounters and maintain peaceful first contact protocols.
+                        </div>
+                    </div>
+
+                    <div class="preview-section">
+                        <div class="preview-section-title">Crew Roster</div>
+                        <ul class="crew-list">
+                            <li class="crew-item">
+                                <span class="crew-name">captain-kirk</span>
+                                <span class="crew-role">Commander</span>
+                            </li>
+                            <li class="crew-item">
+                                <span class="crew-name">spock</span>
+                                <span class="crew-role">Science Officer</span>
+                            </li>
+                            <li class="crew-item">
+                                <span class="crew-name">scotty</span>
+                                <span class="crew-role">Engineer</span>
+                            </li>
+                            <li class="crew-item">
+                                <span class="crew-name">bones</span>
+                                <span class="crew-role">Medical</span>
+                            </li>
+                            <li class="crew-item">
+                                <span class="crew-name">uhura</span>
+                                <span class="crew-role">Communications</span>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div class="preview-section">
+                        <div class="preview-section-title">Mission Progress</div>
+                        <div style="margin-bottom: 4px; font-size: 11px; color: #CCCCCC;">Wave 3 of 5 • 60% Complete</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: 60%;"></div>
+                        </div>
+                    </div>
+
+                    <div class="preview-section">
+                        <div class="preview-section-title">Recent Activity</div>
+                        <ul class="activity-list">
+                            <li class="activity-item">
+                                <span class="activity-time">2m ago</span>
+                                <span class="activity-text">Wave 3 started</span>
+                            </li>
+                            <li class="activity-item">
+                                <span class="activity-time">15m ago</span>
+                                <span class="activity-text">Encounter logged: Species 4713</span>
+                            </li>
+                            <li class="activity-item">
+                                <span class="activity-time">1h ago</span>
+                                <span class="activity-text">Wave 2 completed successfully</span>
+                            </li>
+                            <li class="activity-item">
+                                <span class="activity-time">3h ago</span>
+                                <span class="activity-text">First contact protocol initiated</span>
+                            </li>
+                            <li class="activity-item">
+                                <span class="activity-time">5h ago</span>
+                                <span class="activity-text">Entered uncharted sector M-113</span>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div class="preview-section">
+                        <div class="preview-section-title">Actions</div>
+                        <div class="preview-actions">
+                            <button class="preview-action">[Enter] Bridge</button>
+                            <button class="preview-action">[p] Planning</button>
+                            <button class="preview-action">[a] Assign Crew</button>
+                            <button class="preview-action">[d] Edit Directive</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Toolbar -->
+            <div class="navigable-toolbar">
+                <span class="toolbar-button">
+                    <span class="toolbar-key">[n]</span>
+                    <span class="toolbar-label">New Ship</span>
+                </span>
+                <span class="toolbar-separator">•</span>
+                <span class="toolbar-button">
+                    <span class="toolbar-key">[d]</span>
+                    <span class="toolbar-label">Directive</span>
+                </span>
+                <span class="toolbar-separator">•</span>
+                <span class="toolbar-button">
+                    <span class="toolbar-key">[r]</span>
+                    <span class="toolbar-label">Roster</span>
+                </span>
+                <span class="toolbar-separator">•</span>
+                <span class="toolbar-button">
+                    <span class="toolbar-key">[i]</span>
+                    <span class="toolbar-label">Inbox</span>
+                </span>
+                <span class="toolbar-separator">•</span>
+                <span class="toolbar-button">
+                    <span class="toolbar-key">[m]</span>
+                    <span class="toolbar-label">Monitor</span>
+                </span>
+                <span class="toolbar-separator">•</span>
+                <span class="toolbar-button">
+                    <span class="toolbar-key">[s]</span>
+                    <span class="toolbar-label">Settings</span>
+                </span>
+                <span class="toolbar-separator">•</span>
+                <span class="toolbar-button">
+                    <span class="toolbar-key">[?]</span>
+                    <span class="toolbar-label">Help</span>
+                </span>
+                <span class="toolbar-separator">•</span>
+                <span class="toolbar-button">
+                    <span class="toolbar-key">[q]</span>
+                    <span class="toolbar-label">Quit</span>
+                </span>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

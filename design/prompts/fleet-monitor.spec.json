@@ -1,0 +1,91 @@
+{
+  "design_key": "fleet-monitor",
+  "name": "Fleet Monitor",
+  "version": "2.0",
+  "description": "Condensed real-time monitoring view showing all LAUNCHED ships at a glance",
+  "screen": {
+    "type": "drill-down",
+    "parent": "fleet-overview",
+    "children": [],
+    "mode_availability": { "basic": false, "advanced": true, "executive": true },
+    "mode_differences": {
+      "advanced": ["Full single-row-per-ship with all metrics"],
+      "executive": ["Same layout with health scores emphasized"]
+    }
+  },
+  "layout": {
+    "structure": "MonitorHeader | ShipStatusGrid (100%) | NavigableToolbar",
+    "rows": [
+      {
+        "name": "header",
+        "height": 2,
+        "panels": [
+          {
+            "id": "monitor-header",
+            "width": "100%",
+            "description": "'FLEET MONITOR' in bold butterscotch. Active ship count, total agents running, fleet-wide wave progress, pending questions badge. Auto-refreshes every tick."
+          }
+        ]
+      },
+      {
+        "name": "ship-grid",
+        "height": "fill",
+        "panels": [
+          {
+            "id": "ship-status-grid",
+            "width": "100%",
+            "description": "Scrollable grid of ShipStatusRow components. Each row: [status-icon] ShipName  Directive  Crew:N  Wave K/L [bar]  Missions:done/total  Health:***oo. Color-coded: butterscotch=LAUNCHED, green_ok=COMPLETE, red_alert=HALTED, yellow_caution=STUCK. Selected=moonlit_violet. Enter drills into Ship Bridge."
+          }
+        ]
+      },
+      {
+        "name": "toolbar",
+        "height": 1,
+        "panels": [
+          {
+            "id": "navigable-toolbar",
+            "width": "100%",
+            "description": "NavigableToolbar: [Enter] Bridge  [i] Inbox  [?] Help  [Esc] Fleet"
+          }
+        ]
+      }
+    ],
+    "responsive": {
+      "standard": { "min_width": 120, "description": "Full single-row-per-ship with all metrics" },
+      "compact": { "threshold": "<120 cols", "description": "Rows truncate to: icon + name + wave bar + mission count" }
+    }
+  },
+  "components": [
+    { "name": "MonitorHeader", "charm_base": "lipgloss.JoinHorizontal + lipgloss.NewStyle()", "tokens_used": ["butterscotch", "space_white", "pink"], "variants": [] },
+    { "name": "ShipStatusRow", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["butterscotch", "green_ok", "yellow_caution", "red_alert", "blue", "galaxy_gray", "space_white", "moonlit_violet", "pink"], "variants": ["launched", "complete", "has_issues"] },
+    { "name": "WaveProgressBar", "charm_base": "bubbles.progress", "tokens_used": ["butterscotch", "gold", "green_ok", "galaxy_gray"], "variants": ["active", "complete", "pending"] },
+    { "name": "HealthBar", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["green_ok", "yellow_caution", "red_alert", "galaxy_gray"], "variants": ["ok", "warning", "critical"] },
+    { "name": "NavigableToolbar", "charm_base": "lipgloss.JoinHorizontal + lipgloss.NewStyle() + bubbles.key", "tokens_used": ["butterscotch", "moonlit_violet", "galaxy_gray", "space_white"], "variants": ["default", "navigating"] }
+  ],
+  "data_sources": [
+    { "source": "fleet_state", "description": "All ships filtered to LAUNCHED + COMPLETE" },
+    { "source": "wave_progress", "description": "Per-ship wave completion" },
+    { "source": "fleet_health", "description": "Per-ship health metrics" },
+    { "source": "pending_messages", "description": "Pending question counts per ship" }
+  ],
+  "keyboard": {
+    "global": { "Tab": "Cycle: ship-status-grid -> navigable-toolbar", "?": "Help", "q": "Quit" },
+    "view_specific": { "Up/Down": "Navigate ship rows", "Enter": "Open Ship Bridge", "i": "Message Center", "Escape": "Fleet Overview" },
+    "toolbar_buttons": [
+      { "key": "Enter", "label": "Bridge", "action": "Open Ship Bridge" },
+      { "key": "i", "label": "Inbox", "action": "Message Center" },
+      { "key": "?", "label": "Help", "action": "Help overlay" },
+      { "key": "Esc", "label": "Fleet", "action": "Fleet Overview" }
+    ]
+  },
+  "transitions": [
+    { "to": "fleet-overview", "trigger": "Escape", "type": "pop", "animation": { "preset": "view_switch", "direction": "slide-left" } },
+    { "to": "ship-bridge", "trigger": "Enter on ship row", "type": "push", "animation": { "preset": "view_switch", "direction": "slide-right" } }
+  ],
+  "special_behavior": [],
+  "tokens": {
+    "colors": { "primary": "butterscotch", "accent": "moonlit_violet" },
+    "borders": { "default": "lipgloss.RoundedBorder() in blue", "focused": "lipgloss.RoundedBorder() in moonlit_violet" },
+    "icons": { "launched": "\u25B8", "complete": "\u2713", "has_issues": "\u26A0" }
+  }
+}

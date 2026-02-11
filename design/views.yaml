@@ -1,0 +1,1610 @@
+# Ship Commander 3 -- View Specifications (Revised Mental Model)
+# Detailed layout, component, data source, and interaction specifications per view
+#
+# REVISED MENTAL MODEL:
+#   Fleet Overview -> Ship Bridge -> Ready Room / Agent Detail / Mission Detail
+#   Ready Room -> Plan Review (drill-down for coverage/dependency analysis)
+#   Fleet Overview -> Fleet Monitor (condensed multi-ship monitoring)
+#   Agent Roster, Directive Editor, and Message Center are top-level views
+#   accessible from Fleet Overview.
+#
+# DESIGN PRINCIPLES:
+#   1. Each screen serves ONE purpose. If something needs detail, it gets a
+#      dedicated drill-down view rather than being crammed as a panel.
+#   2. NavigableToolbar: Every view has a bottom toolbar with shortcut buttons.
+#      Buttons are selectable via shortcut key OR arrow Left/Right + Enter.
+#      This is the user's "where can I go?" wayfinding bar.
+#
+# Layout notation:
+#   Rows separated by '|' (vertical stacking)
+#   Columns separated by '+' within a row (horizontal join)
+#   Percentages indicate relative size within the row
+#
+# Charm library mapping:
+#   Framework:  Bubble Tea (tea.Model, tea.Cmd, tea.Msg)
+#   Styling:    Lipgloss (lipgloss.Style, lipgloss.JoinVertical/JoinHorizontal, lipgloss.Place)
+#   Components: Bubbles (viewport, textinput, list, spinner, progress, help, key, table, filepicker)
+#   Forms:      Huh (huh.Form, huh.Select, huh.Input, huh.Text, huh.Confirm, huh.MultiSelect)
+#   Markdown:   Glamour (glamour.Render, glamour.RenderWithEnvironmentConfig)
+#   Animation:  Harmonica (harmonica.NewSpring, harmonica.Update)
+#   Logging:    charmbracelet/log (log.Info, log.Warn, log.Error with Lipgloss styling)
+
+version: "2.0"
+created: "2026-02-10"
+project: ship-commander-3
+
+views:
+
+  # ---------------------------------------------------------------------------
+  # VIEW 1: Fleet Overview (Landing Screen)
+  # ---------------------------------------------------------------------------
+  - id: fleet-overview
+    name: Fleet Overview
+    description: >
+      The Admiral's command center. The primary landing screen showing all
+      commissioned ships in the fleet with their status, directives, crew,
+      and mission progress. This is where the Admiral manages their fleet
+      at a high level -- commissioning ships, assigning directives, and
+      monitoring fleet-wide progress.
+    layout:
+      structure: "HeaderBar | ShipList (60%) + ShipPreview (40%) | NavigableToolbar"
+      rows:
+        - name: header
+          height: 3
+          panels:
+            - id: header-bar
+              width: "100%"
+              description: >
+                Row 1: "FLEET COMMAND" in bold gold. Ship count, launched count,
+                pending messages (pink badge if > 0), fleet health indicator.
+                Row 2: Fleet-wide metrics inline: missions (done/total), agents
+                active (N/max WIP), pending questions, fleet health score.
+                Compact single-line in standard width.
+
+        - name: fleet-content
+          height: "fill"
+          panels:
+            - id: ship-list
+              width: "60%"
+              description: >
+                Scrollable list of commissioned ships as ShipCards. Each card
+                shows: ship name (bold butterscotch), ship class (faint),
+                directive title (blue, or "No Directive" in galaxy_gray),
+                crew count ("Crew: N" with role breakdown), mission progress
+                bar (if directive assigned), ship status badge (DOCKED,
+                LAUNCHED, COMPLETE, HALTED). Ships sorted by: launched first,
+                then docked, then complete. Selected ship highlighted with
+                moonlit_violet border.
+
+            - id: ship-preview
+              width: "40%"
+              description: >
+                Detail preview for the selected ship. Shows:
+                - Ship name and class in header
+                - Directive summary (title + first paragraph via Glamour)
+                - Crew roster (agent names with role badges)
+                - Mission progress (if launched): wave progress bars,
+                  active mission count, recent gate results
+                - Recent activity log (last 5 events for this ship)
+                - Available actions: [Enter] Bridge, [l] Launch, [p] Plan,
+                  [a] Assign Crew, [d] Assign Directive
+
+        - name: toolbar
+          height: 1
+          panels:
+            - id: navigable-toolbar
+              width: "100%"
+              description: >
+                NavigableToolbar component. A row of labeled shortcut buttons
+                rendered as: [n] New  [d] Directive  [r] Roster  [i] Inbox  [s] Settings  [?] Help  [q] Quit
+                Each button is selectable two ways:
+                1. Press the shortcut key directly (e.g., 'n' for New)
+                2. Arrow Left/Right to highlight a button, then press Enter
+                The currently highlighted button has a moonlit_violet background.
+                When no button is highlighted, shortcut keys still work.
+                This is the user's "where can I go?" wayfinding bar.
+
+    components:
+      - HeaderBar (fleet variant, with inline fleet metrics)
+      - ShipCard (per ship)
+      - ShipPreviewPanel
+      - StatusBadge
+      - WaveProgressBar (in preview)
+      - CrewRosterMini (in preview)
+      - NavigableToolbar
+
+    data_sources:
+      - source: fleet_state
+        description: "All ships with status, directive assignments, crew, mission progress"
+      - source: agent_roster
+        description: "All agents with assignment status"
+      - source: pending_messages
+        description: "Count and priority of unread messages"
+      - source: fleet_health
+        description: "Aggregate health metrics across all ships"
+
+    keyboard_shortcuts:
+      Up/Down: "Navigate ship list"
+      Enter: "Open Ship Bridge for selected ship"
+      n: "Commission new ship"
+      d: "Create/assign directive"
+      r: "Open Agent Roster"
+      i: "Open Message Center"
+      l: "Launch selected ship (if plan approved)"
+      p: "Open Ready Room for selected ship (if directive assigned)"
+      a: "Assign crew to selected ship"
+      Tab: "Cycle focus: ship-list -> ship-preview -> navigable-toolbar"
+      Shift+Tab: "Reverse focus cycle"
+      "?": "Open help overlay"
+      q: "Quit TUI (with confirmation)"
+
+    responsive_behavior:
+      standard:
+        min_width: 120
+        description: "Two-column layout: ship list + preview side by side"
+      compact:
+        threshold: "<120 cols"
+        description: >
+          Ship list takes full width. Preview is hidden; Enter drills
+          directly into Ship Bridge. Fleet summary collapses to single line.
+
+    special_behavior:
+      - trigger: "Ship has pending Admiral questions"
+        behavior: >
+          Ship card shows a pink notification badge with question count.
+          Badge uses Harmonica under-damped bounce animation for attention.
+      - trigger: "Ship status changes (launch, complete, halt)"
+        behavior: >
+          Ship card status badge animates with Harmonica spring. Launched
+          ships sort to top of list.
+      - trigger: "Empty fleet (no ships)"
+        behavior: >
+          Shows welcome state: "Your fleet is empty. Press [n] to commission
+          your first starship." with a prominent butterscotch call-to-action.
+
+  # ---------------------------------------------------------------------------
+  # VIEW 2: Ship Bridge (Per-Ship Execution Dashboard)
+  # ---------------------------------------------------------------------------
+  - id: ship-bridge
+    name: Ship Bridge
+    description: >
+      The per-ship monitoring and control view. Shows the ship's crew,
+      assigned directive, mission progress, TDD phases, gate results,
+      wave execution, and event log. This is the equivalent of the old
+      "execution dashboard" but scoped to a single ship. The layout
+      adapts based on ship status: DOCKED shows setup actions, LAUNCHED
+      shows execution monitoring.
+    layout:
+      structure: >
+        ShipHeaderBar |
+        CrewPanel (40%) + MissionBoard (60%) |
+        EventLog (100%) |
+        NavigableToolbar
+
+      rows:
+        - name: header
+          height: 3
+          panels:
+            - id: ship-header-bar
+              width: "100%"
+              description: >
+                Row 1: Ship name (bold butterscotch), ship class (faint),
+                directive title (blue), ship status badge (color-coded).
+                Row 2: Health indicator, crew count, mission progress (N/M
+                done), active wave summary "Wave K of L [compact bar]",
+                pending question badge. The wave summary is an inline
+                condensed progress indicator (moved from the removed
+                tactical row). For detailed wave/phase info, drill into
+                Mission Detail or Wave Manager.
+
+        - name: crew-and-missions
+          height: "60%"
+          panels:
+            - id: crew-panel
+              width: "40%"
+              description: >
+                The ship's crew roster as AgentCards. Each card shows: agent
+                name (bold), role badge (Captain=gold, Commander=blue,
+                Ensign=butterscotch), current mission assignment, TDD phase,
+                elapsed timer, status (running/idle/stuck/done). Stuck agents
+                highlighted with yellow_caution. Selected crew member
+                highlighted with moonlit_violet.
+                When DOCKED: shows crew with "Idle" status and [a] Assign
+                Crew action. When LAUNCHED: shows active execution status.
+
+            - id: mission-board
+              width: "60%"
+              description: >
+                Kanban-style mission board. Header: "B:N IP:N R:N D:N H:N"
+                with color-coded counts. Below: scrollable mission list for
+                focused column. Each mission shows: ID, title (truncated),
+                classification badge (RED_ALERT/STANDARD_OPS), assigned
+                agent, phase, AC progress.
+                When DOCKED (no plan): "No missions yet. Press [p] to plan."
+                When DOCKED (plan approved): "Plan approved. Press [l] to launch."
+
+        - name: events
+          height: "fill"
+          panels:
+            - id: event-log
+              width: "100%"
+              description: >
+                Scrollable event log scoped to this ship. Last 50 events.
+                [timestamp] [severity-icon] [actor] message. Color-coded
+                by severity. Auto-scroll with manual override.
+
+        - name: toolbar
+          height: 1
+          panels:
+            - id: navigable-toolbar
+              width: "100%"
+              description: >
+                NavigableToolbar component. Context-sensitive shortcut buttons.
+                DOCKED: [p] Plan  [a] Assign  [l] Launch  [w] Wave  [?] Help  [Esc] Fleet
+                LAUNCHED: [h] Halt  [r] Retry  [w] Wave  [d] Dock  [?] Help  [Esc] Fleet
+                Each button is selectable via shortcut key OR arrow + Enter.
+                Highlighted button has moonlit_violet background.
+
+    components:
+      - ShipHeaderBar (with inline wave summary)
+      - AgentCard (per crew member)
+      - StatusBadge
+      - ElapsedTimer
+      - MissionBoard
+      - MissionCard
+      - EventLog
+      - EventRow
+      - NavigableToolbar
+      - Spinner
+
+    data_sources:
+      - source: ship_state
+        description: "Ship ID, name, class, status, directive, crew assignments"
+      - source: agent_states
+        description: "Crew member agent instances with role, status, mission, phase"
+      - source: mission_states
+        description: "All missions for this ship's directive"
+      - source: ac_phases
+        description: "Per-AC TDD phase state"
+      - source: gate_evidence
+        description: "Gate results for this ship's missions"
+      - source: wave_progress
+        description: "Wave assignments and completion for this directive"
+      - source: event_stream
+        description: "Events scoped to this ship"
+
+    keyboard_shortcuts:
+      Tab: "Cycle focus: crew-panel -> mission-board -> event-log -> navigable-toolbar"
+      Shift+Tab: "Reverse focus cycle"
+      Enter: "Drill into selected crew member or mission (or activate highlighted toolbar button)"
+      Escape: "Return to Fleet Overview"
+      Left/Right: "Navigate toolbar buttons (when toolbar focused)"
+      p: "Open Ready Room (plan directive, DOCKED only)"
+      l: "Launch ship (plan approved, DOCKED only)"
+      a: "Assign crew (DOCKED only)"
+      h: "Halt selected mission (LAUNCHED only)"
+      r: "Retry selected mission (LAUNCHED only)"
+      w: "Open wave manager (LAUNCHED only)"
+      d: "Dock ship (pause execution, LAUNCHED only)"
+      Space: "Pause/resume propulsion (LAUNCHED only)"
+      "?": "Open help overlay"
+      q: "Quit TUI (with confirmation)"
+
+    responsive_behavior:
+      standard:
+        min_width: 120
+        description: "Full two-column layout, all panels visible"
+      compact:
+        threshold: "<120 cols"
+        description: >
+          Crew and missions stack vertically. Phase tracker hidden (available
+          via drill-down). Wave progress shows single summary line. Event
+          log reduced to 4 lines.
+
+    special_behavior:
+      - trigger: "Ship is DOCKED with no directive"
+        behavior: >
+          Mission board shows empty state: "Assign a directive to begin.
+          Press [d] from Fleet Overview." Tactical panels hidden. Crew
+          panel shows idle agents with assignment controls.
+      - trigger: "Ship is DOCKED with plan approved"
+        behavior: >
+          A prominent launch indicator appears: "Plan approved. Ready to
+          launch. Press [l] to engage." with butterscotch animation.
+      - trigger: "Ship is LAUNCHED and crew member asks question"
+        behavior: >
+          Admiral Question modal overlays the bridge immediately.
+      - trigger: "All missions complete"
+        behavior: >
+          Ship status transitions to COMPLETE. Green_ok celebration
+          animation. Summary statistics shown.
+
+  # ---------------------------------------------------------------------------
+  # VIEW 3: Ready Room (Directive Planning)
+  # ---------------------------------------------------------------------------
+  - id: ready-room
+    name: Ready Room (Directive Planning)
+    description: >
+      The Captain's Ready Room for planning how a directive will be fulfilled.
+      The ship's Captain, Commander, and specialist crew members collaboratively
+      decompose the directive into missions. The Admiral observes, answers
+      questions, and ultimately approves the plan.
+    layout:
+      structure: "ReadyRoomHeader | DirectiveSidebar (30%) + CrewSessionGrid (70%) | NavigableToolbar"
+      notes: >
+        Coverage report and dependency graph have been moved OUT of this view.
+        They now live in the Plan Review view (promoted from overlay to full-screen
+        view). The Ready Room focuses on ONE job: monitoring crew planning sessions.
+        The Admiral sees the directive and watches the crew work. When consensus
+        is reached, they navigate to Plan Review for the detailed analysis.
+      rows:
+        - name: header
+          height: 2
+          panels:
+            - id: ready-room-header
+              width: "100%"
+              description: >
+                "READY ROOM -- <Ship Name>" in bold purple. Directive title
+                (blue). Planning iteration (e.g., "Iteration 2/5"). Pending
+                question count. Crew complement summary.
+
+        - name: planning-content
+          height: "fill"
+          panels:
+            - id: directive-sidebar
+              width: "30%"
+              description: >
+                The directive (PRD) content rendered via Glamour markdown.
+                Scrollable viewport. Shows: title, description, use cases,
+                acceptance criteria, scope boundaries. The Admiral can
+                reference this while monitoring planning progress.
+                Togglable in compact mode with [t] to give crew grid full width.
+
+            - id: crew-session-grid
+              width: "70%"
+              description: >
+                Grid of crew member session panels. Each panel shows the
+                agent's name, role, status indicator (working/done/waiting/
+                failed), harness + model, elapsed timer, output summary.
+                Layout: 2-3 columns depending on crew size. Captain and
+                Commander always shown; Ensigns shown if assigned.
+                Active sessions have butterscotch border. Done sessions
+                have green_ok border.
+
+        - name: toolbar
+          height: 1
+          panels:
+            - id: navigable-toolbar
+              width: "100%"
+              description: >
+                NavigableToolbar component. Planning-mode shortcut buttons:
+                [a] Approve  [f] Feedback  [s] Shelve  [v] Review Plan  [t] Toggle Directive  [?] Help  [Esc] Bridge
+                "Review Plan" navigates to the Plan Review view for detailed
+                coverage/dependency analysis. Each button selectable via
+                shortcut key OR arrow + Enter.
+
+    components:
+      - ReadyRoomHeader
+      - Viewport (directive content via Glamour)
+      - SpecialistCard (per crew member, renamed context)
+      - SpecialistGrid (crew session layout)
+      - PlanningIterationBadge
+      - SignoffTracker
+      - NavigableToolbar
+      - StatusBadge
+      - ElapsedTimer
+      - Spinner
+
+    data_sources:
+      - source: ship_state
+        description: "Ship ID, name, directive"
+      - source: directive_content
+        description: "Full directive PRD content for Glamour rendering"
+      - source: crew_sessions
+        description: "Planning agent sessions (Captain, Commander, specialists)"
+      - source: planning_messages
+        description: "ReadyRoomMessage stream between sessions"
+      - source: mission_manifest
+        description: "Current draft mission list with coverage and dependencies"
+      - source: planning_iteration
+        description: "Current iteration count, consensus status"
+      - source: pending_questions
+        description: "Queue of ADMIRAL_QUESTION events"
+
+    keyboard_shortcuts:
+      Tab: "Cycle focus: directive-sidebar -> crew-sessions -> navigable-toolbar"
+      Shift+Tab: "Reverse focus cycle"
+      Left/Right: "Navigate toolbar buttons (when toolbar focused)"
+      Enter: "Drill into crew member for full output (or activate highlighted toolbar button)"
+      Escape: "Return to Ship Bridge"
+      a: "Approve plan (when consensus reached)"
+      f: "Provide feedback (reconvene planning)"
+      s: "Shelve plan (save for later)"
+      v: "Open Plan Review view (coverage, dependencies, manifest)"
+      t: "Toggle directive sidebar (compact mode)"
+      "?": "Open help overlay"
+
+    responsive_behavior:
+      standard:
+        min_width: 120
+        description: "Full layout: directive sidebar + crew grid side-by-side"
+      compact:
+        threshold: "<120 cols"
+        description: >
+          Directive sidebar collapses to a togglable panel. Crew sessions
+          stack vertically. Coverage and dependency merge into tabbed panel.
+
+    special_behavior:
+      - trigger: "Pending ADMIRAL_QUESTION"
+        behavior: >
+          Admiral question modal overlays. Identifies asking crew member
+          by name and role. Planning suspends until answered.
+      - trigger: "Consensus reached"
+        behavior: >
+          Plan review overlay opens automatically. All sign-offs complete.
+
+  # ---------------------------------------------------------------------------
+  # VIEW 4: Agent Roster
+  # ---------------------------------------------------------------------------
+  - id: agent-roster
+    name: Agent Roster
+    description: >
+      Fleet-wide agent management view. The Admiral creates, edits, and manages
+      their pool of agents (Commanders, Captains, Ensigns). Agents are assigned
+      to ships from this roster. Each agent has a full profile with name, role,
+      skills, model, mission prompt, and optional flavor attributes.
+    layout:
+      structure: "RosterHeader | RoleFilter (20%) + AgentList (40%) + AgentDetail (40%) | NavigableToolbar"
+      rows:
+        - name: header
+          height: 2
+          panels:
+            - id: roster-header
+              width: "100%"
+              description: >
+                "AGENT ROSTER" in bold blue. Agent count by role type:
+                "Commanders: N | Captains: N | Ensigns: N | Unassigned: N"
+
+        - name: roster-content
+          height: "fill"
+          panels:
+            - id: role-filter
+              width: "20%"
+              description: >
+                Role type filter sidebar. Categories: All, Commanders,
+                Captains, Ensigns, Unassigned. Selected category highlighted
+                with moonlit_violet. Count shown next to each category.
+                Keyboard: Up/Down to select category, Enter to filter.
+
+            - id: agent-list
+              width: "40%"
+              description: >
+                Scrollable list of agents filtered by selected role category.
+                Each agent row shows: name (bold), role badge (color-coded),
+                model (faint), assignment (ship name or "Unassigned" in
+                galaxy_gray), status indicator (idle=gray, active=butterscotch,
+                stuck=yellow_caution).
+
+            - id: agent-detail
+              width: "40%"
+              description: >
+                Full profile for selected agent:
+                - Name (bold butterscotch, large)
+                - Role (badge with color)
+                - Age (if set, faint)
+                - Backstory (if set, Glamour markdown in faint italic)
+                - Skills (slash notation list, each on own line)
+                - Model (with validation indicator: checkmark if valid on
+                  harness, cross if not)
+                - Mission Prompt (truncated preview, scrollable)
+                - Current Assignment: ship name + directive title, or
+                  "Unassigned"
+                - Status history: when created, last active, total missions
+
+        - name: toolbar
+          height: 1
+          panels:
+            - id: navigable-toolbar
+              width: "100%"
+              description: >
+                NavigableToolbar component. Roster action buttons:
+                [n] New  [Enter] Edit  [a] Assign  [d] Detach  [Del] Delete  [/] Search  [?] Help  [Esc] Fleet
+                Each button selectable via shortcut key OR arrow + Enter.
+
+    components:
+      - RosterHeader
+      - RoleFilterSidebar (bubbles/list)
+      - AgentProfileCard
+      - AgentDetailPanel
+      - Viewport (for backstory and mission prompt)
+      - Glamour (backstory rendering)
+      - StatusBadge
+      - NavigableToolbar
+
+    data_sources:
+      - source: agent_roster
+        description: "All agents with full profiles, assignments, and status"
+      - source: fleet_ships
+        description: "Available ships for assignment"
+      - source: harness_config
+        description: "Permissible models for validation"
+
+    keyboard_shortcuts:
+      Tab: "Cycle focus: role-filter -> agent-list -> agent-detail -> navigable-toolbar"
+      Shift+Tab: "Reverse focus cycle"
+      Up/Down: "Navigate agent list or role filter (whichever focused)"
+      Enter: "Edit selected agent"
+      n: "Create new agent"
+      a: "Assign selected agent to a ship"
+      d: "Detach agent from current ship"
+      Backspace: "Delete agent (with confirmation)"
+      Escape: "Return to Fleet Overview"
+      "?": "Open help overlay"
+      "/": "Search/filter agents by name"
+
+    responsive_behavior:
+      standard:
+        min_width: 120
+        description: "Three-column layout: filter + list + detail"
+      compact:
+        threshold: "<120 cols"
+        description: >
+          Role filter collapses to a dropdown at top. Agent list takes
+          full width. Detail shown on Enter (drill-down) instead of
+          side-by-side.
+
+    special_behavior:
+      - trigger: "Empty roster"
+        behavior: >
+          Shows welcome state: "Your roster is empty. Press [n] to recruit
+          your first crew member." with butterscotch call-to-action.
+      - trigger: "Model validation failure"
+        behavior: >
+          Agent detail shows red_alert cross next to model name with
+          tooltip: "Model '<model>' not available on <harness>."
+
+  # ---------------------------------------------------------------------------
+  # VIEW 5: Directive Editor
+  # ---------------------------------------------------------------------------
+  - id: directive-editor
+    name: Directive Editor
+    description: >
+      Create and manage directives (PRDs). The Admiral imports a Markdown file
+      or writes directive content, reviews the parsed structure (use cases, ACs),
+      and assigns the directive to a ship.
+    layout:
+      structure: "EditorHeader | FileInput + Preview (50/50) | StructureSummary (100%) | NavigableToolbar"
+      rows:
+        - name: header
+          height: 2
+          panels:
+            - id: editor-header
+              width: "100%"
+              description: >
+                "DIRECTIVE EDITOR" in bold purple. Mode indicator: "New" or
+                "Editing: <title>". File path if imported.
+
+        - name: content
+          height: "60%"
+          panels:
+            - id: file-input
+              width: "50%"
+              description: >
+                Left panel: file path input (huh.Input or bubbles/filepicker)
+                at top, then raw Markdown content in a scrollable viewport.
+                The Admiral can browse to a .md file or paste content.
+
+            - id: preview
+              width: "50%"
+              description: >
+                Right panel: live Glamour-rendered preview of the directive
+                content. Updates as the source changes. Shows formatted
+                headings, lists, code blocks, tables from the PRD.
+
+        - name: structure
+          height: "25%"
+          panels:
+            - id: structure-summary
+              width: "100%"
+              description: >
+                Parsed directive structure: table showing extracted use cases
+                (ID, title, AC count), total AC count, scope summary, and
+                any parsing warnings (yellow_caution). Each row shows
+                whether the use case was auto-detected or needs manual
+                confirmation.
+
+        - name: toolbar
+          height: 1
+          panels:
+            - id: navigable-toolbar
+              width: "100%"
+              description: >
+                NavigableToolbar component. Editor action buttons:
+                [Enter] Save & Assign  [Tab] Cycle  [?] Help  [Esc] Cancel
+                Also shows the ship assignment selector inline: "Ship: [dropdown]"
+                Each button selectable via shortcut key OR arrow + Enter.
+
+    components:
+      - EditorHeader
+      - FileInput (huh.Input for path, bubbles/filepicker)
+      - Viewport (raw content + Glamour preview)
+      - Glamour (markdown rendering)
+      - DirectiveStructureTable (bubbles/table)
+      - ShipSelector (huh.Select, inline in toolbar)
+      - NavigableToolbar
+
+    data_sources:
+      - source: directive_content
+        description: "Raw markdown content and parsed structure"
+      - source: fleet_ships
+        description: "Available ships for assignment (DOCKED, no active directive)"
+
+    keyboard_shortcuts:
+      Tab: "Cycle focus: file-input -> preview -> structure -> navigable-toolbar"
+      Left/Right: "Navigate toolbar buttons (when toolbar focused)"
+      Enter: "Save and assign directive (or activate highlighted toolbar button)"
+      Escape: "Cancel and return"
+      "?": "Help overlay"
+
+    responsive_behavior:
+      standard:
+        min_width: 120
+        description: "Two-column: raw + preview side by side"
+      compact:
+        threshold: "<120 cols"
+        description: >
+          Single column: toggle between raw and preview with Tab.
+          Structure summary scrollable.
+
+  # ---------------------------------------------------------------------------
+  # VIEW 6: Message Center
+  # ---------------------------------------------------------------------------
+  - id: message-center
+    name: Message Center
+    description: >
+      Fleet-wide message inbox. Shows all messages from captains, commanders,
+      and the system across all ships. Organized by priority: pending questions
+      first, then alerts, then notifications. The Admiral can respond to
+      questions, navigate to source ships, and manage message state.
+    layout:
+      structure: "InboxHeader | MessageList (40%) + MessageDetail (60%) | NavigableToolbar"
+      rows:
+        - name: header
+          height: 2
+          panels:
+            - id: inbox-header
+              width: "100%"
+              description: >
+                "MESSAGE CENTER" in bold pink. Counts: "Questions: N |
+                Alerts: N | Notifications: N | Total: N unread"
+                Filter tabs: All, Questions, Alerts, Notifications.
+
+        - name: inbox-content
+          height: "85%"
+          panels:
+            - id: message-list
+              width: "40%"
+              description: >
+                Scrollable message list sorted by priority then timestamp.
+                Each message row shows:
+                - Priority icon: question (pink ?), alert (red !),
+                  notification (blue i)
+                - Ship name (faint)
+                - Sender name + role badge
+                - Subject line (truncated)
+                - Timestamp (relative: "2m ago", "1h ago")
+                - Read/unread indicator (bold for unread)
+
+            - id: message-detail
+              width: "60%"
+              description: >
+                Full message content for the selected message:
+                - Header: sender name, role, ship name, timestamp
+                - Body: Glamour-rendered message content
+                - For questions: inline AdmiralQuestionForm
+                - For alerts: action buttons ([g] Go to ship, [h] Halt,
+                  [r] Retry)
+                - For notifications: read-only content with [g] Go to ship
+
+        - name: toolbar
+          height: 1
+          panels:
+            - id: navigable-toolbar
+              width: "100%"
+              description: >
+                NavigableToolbar component. Message action buttons:
+                [Enter] Reply  [g] Go to Ship  [d] Dismiss  [D] Dismiss All  [/] Search  [1-3] Filter  [?] Help  [Esc] Fleet
+                Each button selectable via shortcut key OR arrow + Enter.
+
+    components:
+      - InboxHeader
+      - MessageRow
+      - MessageList (bubbles/list)
+      - MessageDetailPanel
+      - AdmiralQuestionForm (inline for questions)
+      - Glamour (message rendering)
+      - StatusBadge
+      - NavigableToolbar
+
+    data_sources:
+      - source: messages
+        description: "All fleet messages with priority, read status, content"
+      - source: pending_questions
+        description: "ADMIRAL_QUESTION events awaiting answers"
+      - source: fleet_ships
+        description: "Ship references for 'go to ship' navigation"
+
+    keyboard_shortcuts:
+      Tab: "Cycle focus: message-list -> message-detail -> navigable-toolbar"
+      Up/Down: "Navigate message list"
+      Enter: "Open/respond to selected message"
+      g: "Go to source ship's bridge"
+      d: "Dismiss selected message"
+      D: "Dismiss all read messages"
+      Escape: "Return to Fleet Overview"
+      "?": "Help overlay"
+      "/": "Search/filter messages"
+      "1": "Filter: Questions only"
+      "2": "Filter: Alerts only"
+      "3": "Filter: Notifications only"
+      "0": "Filter: All messages"
+
+    responsive_behavior:
+      standard:
+        min_width: 120
+        description: "Two-column: message list + detail side by side"
+      compact:
+        threshold: "<120 cols"
+        description: >
+          Single column: message list full width. Enter drills into
+          message detail. Escape returns to list.
+
+    special_behavior:
+      - trigger: "New message arrives"
+        behavior: >
+          If message center is open, new message appears at top of list
+          with a brief Harmonica bounce animation. If on another view,
+          the header notification badge increments.
+      - trigger: "No messages"
+        behavior: >
+          Shows empty state: "No messages. Your fleet is running smoothly."
+
+  # ---------------------------------------------------------------------------
+  # VIEW 7: Plan Review (Full-Screen Drill-Down)
+  # ---------------------------------------------------------------------------
+  - id: plan-review
+    name: Plan Review
+    description: >
+      Full-screen drill-down view for reviewing the mission manifest before
+      approval. Promoted from overlay to its own view to avoid cluttering
+      the Ready Room. This is where the Admiral sees the detailed analysis:
+      coverage matrix, dependency graph, and full manifest. The Admiral
+      navigates here from the Ready Room via [v] or automatically when
+      consensus is reached. This view also absorbs the coverage and dependency
+      panels that were previously in the Ready Room.
+    layout:
+      structure: "PlanReviewHeader | ManifestViewport (50%) + AnalysisPanel (50%) | NavigableToolbar"
+      rows:
+        - name: header
+          height: 3
+          panels:
+            - id: plan-review-header
+              width: "100%"
+              description: >
+                Row 1: "PLAN REVIEW -- <Ship Name>" in bold butterscotch.
+                Directive title.
+                Row 2: Summary stats: mission count, wave count, coverage
+                percentage, sign-off status (N/M crew signed off).
+
+        - name: content
+          height: "fill"
+          panels:
+            - id: manifest-viewport
+              width: "50%"
+              description: >
+                Scrollable Glamour-rendered mission manifest. Each mission:
+                sequence number, title, classification badge, wave, use-case
+                refs, AC count, surface area. Separated by horizontal rules.
+                This is the full mission plan that the crew produced.
+
+            - id: analysis-panel
+              width: "50%"
+              description: >
+                Vertically stacked analysis content:
+                Top half: Coverage matrix -- use-case coverage from the
+                directive. Each use case mapped to implementing mission(s).
+                Icons: checkmark (covered), warning (partial), cross
+                (uncovered). Total coverage percentage.
+                Bottom half: Dependency graph -- ASCII dependency tree
+                showing wave groupings and mission relationships. Wave
+                numbers in bold blue. Mission IDs in butterscotch.
+                Dependencies in dim text.
+
+        - name: toolbar
+          height: 1
+          panels:
+            - id: navigable-toolbar
+              width: "100%"
+              description: >
+                NavigableToolbar component. Approval action buttons:
+                [a] Approve  [f] Feedback  [s] Shelve  [?] Help  [Esc] Ready Room
+                When "Feedback" is selected, a huh.Text multi-line input
+                expands inline above the toolbar for the Admiral to type
+                feedback. Each button selectable via shortcut key OR
+                arrow + Enter.
+
+    components:
+      - PlanReviewHeader
+      - Viewport (manifest via Glamour)
+      - Glamour
+      - CoverageMatrix
+      - DependencyGraph
+      - NavigableToolbar
+      - PlanApprovalForm (huh.Form, inline for feedback)
+
+    data_sources:
+      - source: mission_manifest
+        description: "Complete mission list"
+      - source: use_case_coverage
+        description: "Per-use-case coverage"
+      - source: dependency_graph
+        description: "Mission dependencies and waves"
+      - source: crew_signoffs
+        description: "Sign-off status per crew member"
+
+    keyboard_shortcuts:
+      Up/Down: "Scroll manifest or navigate analysis"
+      Tab: "Cycle focus: manifest -> analysis-panel -> navigable-toolbar"
+      Shift+Tab: "Reverse focus cycle"
+      Left/Right: "Navigate toolbar buttons (when toolbar focused)"
+      Enter: "Activate highlighted toolbar button"
+      a: "Approve plan"
+      f: "Provide feedback (opens inline text input)"
+      s: "Shelve plan"
+      Escape: "Return to Ready Room"
+      "?": "Help overlay"
+
+    responsive_behavior:
+      standard:
+        min_width: 120
+        description: "Two-column: manifest + analysis side by side"
+      compact:
+        threshold: "<120 cols"
+        description: "Stacked layout: manifest on top, analysis below as tabbed panels"
+
+  # ---------------------------------------------------------------------------
+  # VIEW 8: Admiral Question Modal
+  # ---------------------------------------------------------------------------
+  - id: admiral-question-modal
+    name: Admiral Question Modal
+    description: >
+      Centered modal for crew member questions to the Admiral. Shows the
+      crew member's identity, ship context, question content, and response
+      controls.
+    layout:
+      structure: "ModalHeader | QuestionContent | OptionSelect | FreeTextInput | BroadcastToggle | SubmitHint"
+      overlay:
+        width: "60%"
+        height: auto
+        position: centered
+        background: "dimmed underlying view"
+        animation:
+          open: "Harmonica spring, under-damped ratio=0.8"
+          close: "Harmonica spring, critically-damped ratio=1.0"
+      rows:
+        - name: modal-header
+          height: 2
+          panels:
+            - id: question-header
+              width: "100%"
+              description: >
+                "ADMIRAL -- QUESTION FROM <Agent Name>" in bold butterscotch.
+                Ship name (faint). Role badge. Domain badge (functional=blue,
+                technical=butterscotch, design=purple).
+
+        - name: question-content
+          height: auto
+          panels:
+            - id: question-text
+              width: "100%"
+              description: >
+                Question text via Glamour markdown. Context information
+                rendered below.
+
+        - name: options
+          height: auto
+          panels:
+            - id: option-select
+              width: "100%"
+              description: >
+                huh.Select with pre-defined options. Always includes
+                "Skip -- agent uses best judgment." Selected option
+                highlighted moonlit_violet.
+
+        - name: free-text
+          height: 3
+          panels:
+            - id: free-text-input
+              width: "100%"
+              description: "huh.Input for optional free-text clarification."
+
+        - name: broadcast
+          height: 1
+          panels:
+            - id: broadcast-toggle
+              width: "100%"
+              description: >
+                huh.Confirm: "Broadcast to all crew?" Default: No.
+
+        - name: submit
+          height: 1
+          panels:
+            - id: submit-hint
+              width: "100%"
+              description: "'Enter to submit | Tab to cycle fields'"
+
+    components:
+      - ModalOverlay
+      - Glamour (question text)
+      - AdmiralQuestionForm (huh.Form)
+      - StatusBadge (domain badge)
+
+    data_sources:
+      - source: admiral_question
+        description: "Question event with agent identity, ship, domain, content, options"
+
+    keyboard_shortcuts:
+      Up/Down: "Navigate option list"
+      Tab: "Cycle fields"
+      Enter: "Submit response"
+
+  # ---------------------------------------------------------------------------
+  # VIEW 9: Agent Detail (Drill-Down)
+  # ---------------------------------------------------------------------------
+  - id: agent-detail
+    name: Agent Detail
+    description: >
+      Full-screen drill-down for a single agent/crew member. Shows identity,
+      session output, error context, and actions. Accessed by pressing Enter
+      on an agent in the crew panel or agent roster.
+    layout:
+      structure: "AgentProfileHeader | OutputViewport (70%) | ErrorContext (15%, conditional) | NavigableToolbar"
+      rows:
+        - name: agent-profile
+          height: 4
+          panels:
+            - id: agent-profile-header
+              width: "100%"
+              description: >
+                Agent name (bold butterscotch, large), role badge, ship
+                assignment, harness + model, current mission ID (linked),
+                TDD phase indicator, elapsed timer, status badge.
+                Skills summary line. Mission prompt first line (faint).
+
+        - name: output
+          height: "70%"
+          panels:
+            - id: output-viewport
+              width: "100%"
+              description: >
+                Scrollable viewport of recent agent output from tmux.
+                Real-time append. Auto-scroll with manual override.
+                Syntax highlighting where possible. Line numbers in dim.
+
+        - name: error-context
+          height: "15%"
+          condition: "agent.status == 'stuck' || agent.status == 'dead'"
+          panels:
+            - id: error-context-panel
+              width: "100%"
+              description: >
+                Red_alert border panel: last gate failure, stuck detection
+                timestamp, timeout info, last meaningful output line.
+
+        - name: toolbar
+          height: 1
+          panels:
+            - id: navigable-toolbar
+              width: "100%"
+              description: >
+                NavigableToolbar component. Agent action buttons:
+                [h] Halt  [r] Retry  [i] Ignore Stuck  [?] Help  [Esc] Back
+                Each button selectable via shortcut key OR arrow + Enter.
+
+    components:
+      - AgentProfileHeader
+      - Viewport (output stream)
+      - ErrorContextPanel (conditional)
+      - StatusBadge
+      - ElapsedTimer
+      - PhaseIndicator
+      - NavigableToolbar
+
+    data_sources:
+      - source: agent_instance
+        description: "Full agent state"
+      - source: agent_output
+        description: "Real-time output from tmux"
+      - source: gate_evidence
+        description: "Gate results for agent's mission"
+      - source: doctor_alerts
+        description: "Stuck detection events"
+
+    keyboard_shortcuts:
+      Up/Down: "Scroll output"
+      PageUp/PageDown: "Page scroll output"
+      Tab: "Cycle focus: output-viewport -> error-context -> navigable-toolbar"
+      Left/Right: "Navigate toolbar buttons (when toolbar focused)"
+      h: "Halt agent (with confirmation)"
+      r: "Retry mission (with confirmation)"
+      i: "Ignore stuck warning"
+      Enter: "Activate highlighted toolbar button"
+      Escape: "Return to previous view"
+      "?": "Help overlay"
+
+    responsive_behavior:
+      standard:
+        min_width: 80
+        description: "Full layout"
+      compact:
+        threshold: "<80 cols"
+        description: "Profile compresses to 2 lines. Error context behind toggle."
+
+  # ---------------------------------------------------------------------------
+  # VIEW 10: Mission Detail (Drill-Down)
+  # ---------------------------------------------------------------------------
+  - id: mission-detail
+    name: Mission Detail
+    description: >
+      Full-screen drill-down for a single mission. Shows spec, acceptance
+      criteria with TDD phases, gate evidence, demo token preview, and actions.
+    layout:
+      structure: "MissionHeader | ACPhaseDetail (40%) + GateEvidence (30%) + DemoToken (30%) | NavigableToolbar"
+      notes: >
+        This view now absorbs the per-AC phase tracking that was previously
+        in the Ship Bridge tactical row. The ACPhaseDetail panel shows the
+        full 6-dot TDD pipeline per acceptance criterion, giving the Admiral
+        the detailed phase view when they drill into a specific mission.
+      rows:
+        - name: mission-header
+          height: 4
+          panels:
+            - id: mission-header-panel
+              width: "100%"
+              description: >
+                Mission ID, title, classification badge, wave, status,
+                revision count, assigned agent, ship name, use-case refs.
+
+        - name: content
+          height: "fill"
+          panels:
+            - id: ac-phase-detail
+              width: "40%"
+              description: >
+                Scrollable AC list with full TDD phase pipelines. Each row:
+                AC index, 6-dot pipeline colored by phase state (RED ->
+                VERIFY_RED -> GREEN -> VERIFY_GREEN -> REFACTOR ->
+                VERIFY_REFACTOR). Active phase butterscotch (pulsing).
+                Complete green_ok. Failed red_alert. Upcoming dim.
+                Inline gate results per phase. Attempt counts shown if > 1.
+                This is the detailed phase tracker that was moved from the
+                Ship Bridge tactical row into this dedicated view.
+
+            - id: gate-evidence
+              width: "30%"
+              description: >
+                Gate results table sorted newest-first. Columns: timestamp,
+                gate type, AC, exit code, classification. Color-coded rows.
+
+            - id: demo-token-preview
+              width: "30%"
+              description: >
+                Glamour-rendered demo token if present, or placeholder
+                "Demo token not yet produced."
+
+        - name: toolbar
+          height: 1
+          panels:
+            - id: navigable-toolbar
+              width: "100%"
+              description: >
+                NavigableToolbar component. Context-sensitive action buttons:
+                In-progress: [h] Halt  [?] Help  [Esc] Bridge
+                Halted: [r] Retry  [?] Help  [Esc] Bridge
+                Review: [a] Approve  [f] Reject  [?] Help  [Esc] Bridge
+                Done: [w] Worktree  [?] Help  [Esc] Bridge
+                Each button selectable via shortcut key OR arrow + Enter.
+
+    components:
+      - MissionDetailHeader
+      - ACPhaseDetail (absorbs PhaseIndicator per-AC with full pipeline)
+      - PhaseIndicator (per-AC dot pipeline)
+      - ACListItem
+      - GateResultRow
+      - Viewport (demo token via Glamour)
+      - Glamour
+      - NavigableToolbar
+
+    data_sources:
+      - source: mission_instance
+        description: "Full mission state"
+      - source: ac_phases
+        description: "Per-AC TDD phase state"
+      - source: gate_evidence
+        description: "Gate results for this mission"
+      - source: demo_token
+        description: "Demo token content if present"
+
+    keyboard_shortcuts:
+      Up/Down: "Navigate AC list or gate evidence"
+      Tab: "Cycle focus: ac-phase-detail -> gate-evidence -> demo-token -> navigable-toolbar"
+      Shift+Tab: "Reverse focus cycle"
+      Left/Right: "Navigate toolbar buttons (when toolbar focused)"
+      Enter: "Expand selected AC or gate result (or activate highlighted toolbar button)"
+      h: "Halt mission (in-progress)"
+      r: "Retry mission (halted)"
+      a: "Approve (review)"
+      f: "Reject with feedback (review)"
+      Escape: "Return to Ship Bridge"
+      "?": "Help overlay"
+
+    responsive_behavior:
+      standard:
+        min_width: 120
+        description: "Three-column content"
+      compact:
+        threshold: "<120 cols"
+        description: "Stacked: AC list + tabbed gate/demo panels"
+
+  # ---------------------------------------------------------------------------
+  # VIEW 11: Wave Manager (Overlay)
+  # ---------------------------------------------------------------------------
+  - id: wave-manager
+    name: Wave Manager
+    description: >
+      Overlay for reviewing and managing wave execution on a ship. Shows
+      wave progress, per-mission status, conflict detection, and merge controls.
+      Scoped to the current ship.
+    layout:
+      structure: "WaveHeader | WaveList (30%) + WaveMissionDetail (70%) | MergeControls"
+      overlay:
+        width: "95%"
+        height: "90%"
+        position: centered
+        background: "dimmed underlying view"
+      rows:
+        - name: wave-header
+          height: 2
+          panels:
+            - id: wave-header-panel
+              width: "100%"
+              description: >
+                "WAVE MANAGER -- <Ship Name>" in bold butterscotch.
+                Overall: "N/M waves complete, P missions merged."
+
+        - name: content
+          height: "80%"
+          panels:
+            - id: wave-list
+              width: "30%"
+              description: >
+                Wave list with progress bars and mission counts.
+
+            - id: wave-mission-detail
+              width: "70%"
+              description: >
+                Missions in selected wave with status, gate results,
+                conflict indicators, merge readiness.
+
+        - name: toolbar
+          height: 1
+          panels:
+            - id: navigable-toolbar
+              width: "100%"
+              description: >
+                NavigableToolbar component. Wave action buttons:
+                [m] Merge Ready  [c] Merge w/Conflicts  [?] Help  [Esc] Close
+                Each button selectable via shortcut key OR arrow + Enter.
+
+    components:
+      - ModalOverlay
+      - WaveProgressBar
+      - WaveListItem
+      - MissionCard
+      - ConflictIndicator
+      - ConfirmDialog
+      - MergeProgressBar
+      - NavigableToolbar
+
+    data_sources:
+      - source: wave_assignments
+        description: "Waves for current ship's directive"
+      - source: mission_states
+        description: "Per-mission status and merge readiness"
+      - source: conflict_detection
+        description: "Git conflict analysis"
+
+    keyboard_shortcuts:
+      Up/Down: "Navigate wave or mission list"
+      Tab: "Cycle: wave-list -> mission-detail -> merge-controls"
+      Enter: "Select wave / drill into mission"
+      m: "Batch merge (with confirmation)"
+      Escape: "Close wave manager"
+      "?": "Help overlay"
+
+  # ---------------------------------------------------------------------------
+  # VIEW 12: Help Overlay
+  # ---------------------------------------------------------------------------
+  - id: help-overlay
+    name: Help Overlay
+    description: >
+      Context-aware help overlay showing keybindings organized by section.
+    layout:
+      structure: "HelpTitle | KeybindingSections | DismissHint"
+      overlay:
+        width: "70%"
+        height: auto
+        position: centered
+        background: "dimmed underlying view"
+      rows:
+        - name: title
+          height: 2
+          panels:
+            - id: help-title
+              width: "100%"
+              description: >
+                "KEYBOARD SHORTCUTS" in bold butterscotch.
+                "Context: <active view name>" in dim text.
+
+        - name: sections
+          height: auto
+          panels:
+            - id: keybinding-sections
+              width: "100%"
+              description: >
+                Sections organized by context:
+                  Global: Tab, Shift+Tab, Enter, Escape, ?, q, Ctrl+C
+                  Fleet Overview: n, d, r, i, l, p, a
+                  Ship Bridge: p, l, a, h, r, w, d, Space
+                  Ready Room: a (approve), f (feedback), s (shelve)
+                  Agent Roster: n, Enter, a, d, Backspace
+                  Message Center: g, d, D, 1/2/3/0
+                Keys in butterscotch. Descriptions in space_white.
+
+        - name: dismiss
+          height: 1
+          panels:
+            - id: dismiss-hint
+              width: "100%"
+              description: "Press ? or Escape to close"
+
+    components:
+      - ModalOverlay
+      - Help (bubbles/help)
+
+    data_sources:
+      - source: active_view
+        description: "Current view for context-aware filtering"
+      - source: key_bindings
+        description: "Registered keybindings"
+
+    keyboard_shortcuts:
+      "?": "Close"
+      Escape: "Close"
+
+  # ---------------------------------------------------------------------------
+  # VIEW 13: System Health
+  # ---------------------------------------------------------------------------
+  - id: system-health
+    name: System Health
+    description: >
+      Fleet-wide health monitoring. Can be embedded in Fleet Overview or
+      accessed as standalone view. Shows WIP utilization across all ships,
+      Doctor heartbeat, stuck agents, orphaned missions.
+    layout:
+      structure: "HealthHeader | WIPBar + DoctorStatus + AlertCounts | ShipHealthGrid"
+      rows:
+        - name: health-header
+          height: 1
+          panels:
+            - id: health-title
+              width: "100%"
+              description: >
+                "FLEET HEALTH" in bold blue. Overall status indicator.
+
+        - name: metrics
+          height: 3
+          panels:
+            - id: wip-bar
+              width: "33%"
+              description: >
+                Fleet-wide WIP: "Agents: N/M active" with progress bar.
+
+            - id: doctor-status
+              width: "33%"
+              description: >
+                Doctor process status with heartbeat indicator.
+
+            - id: alert-counts
+              width: "34%"
+              description: >
+                Stuck: N, Orphans: N, Halted: N (per-ship breakdown available).
+
+        - name: ship-health
+          height: auto
+          condition: "standalone mode"
+          panels:
+            - id: ship-health-grid
+              width: "100%"
+              description: >
+                Per-ship health summary table: ship name, status, active
+                agents, mission progress, health score. Quick navigation
+                to Ship Bridge on Enter.
+
+    components:
+      - HealthBar
+      - Progress (bubbles/progress)
+      - StatusBadge
+      - Table (bubbles/table)
+
+    data_sources:
+      - source: fleet_health
+        description: "Aggregate health across all ships"
+      - source: wip_state
+        description: "Active agents vs WIP limit"
+      - source: doctor_heartbeat
+        description: "Doctor status"
+      - source: ship_states
+        description: "Per-ship health data"
+
+    keyboard_shortcuts:
+      Enter: "Drill into selected ship"
+      Escape: "Return to previous view"
+      "?": "Help overlay"
+
+  # ---------------------------------------------------------------------------
+  # VIEW 14: Fleet Monitor (Condensed Multi-Ship Dashboard)
+  # ---------------------------------------------------------------------------
+  - id: fleet-monitor
+    name: Fleet Monitor
+    description: >
+      A condensed, real-time monitoring view showing all LAUNCHED ships at
+      a glance. Each ship is a single row (ShipStatusRow) with inline
+      progress, crew health, and wave status. Unlike Fleet Overview which
+      is for management actions, Fleet Monitor is for passive monitoring
+      during execution -- the Admiral watches their fleet operate.
+      Accessible from Fleet Overview via [m] Monitor.
+    layout:
+      structure: "MonitorHeader | ShipStatusGrid (100%) | NavigableToolbar"
+      rows:
+        - name: header
+          height: 2
+          panels:
+            - id: monitor-header
+              width: "100%"
+              description: >
+                "FLEET MONITOR" in bold butterscotch. Active ship count,
+                total agents running, fleet-wide wave progress, pending
+                questions badge. Auto-refreshes every tick.
+
+        - name: ship-grid
+          height: "fill"
+          panels:
+            - id: ship-status-grid
+              width: "100%"
+              description: >
+                Scrollable grid of ShipStatusRow components. Each row shows
+                a single ship on one line:
+                [status-icon] ShipName  Directive  Crew:N  Wave K/L [bar]  Missions:done/total  Health:***oo
+                Rows are color-coded by status: butterscotch (LAUNCHED),
+                green_ok (COMPLETE), red_alert (has HALTED missions),
+                yellow_caution (has STUCK agents).
+                Selected row highlighted with moonlit_violet.
+                Enter drills into that ship's Bridge.
+
+        - name: toolbar
+          height: 1
+          panels:
+            - id: navigable-toolbar
+              width: "100%"
+              description: >
+                NavigableToolbar component. Monitor action buttons:
+                [Enter] Bridge  [i] Inbox  [?] Help  [Esc] Fleet
+                Minimal actions -- this is a monitoring view, not a
+                management view. Each button selectable via shortcut
+                key OR arrow + Enter.
+
+    components:
+      - MonitorHeader
+      - ShipStatusRow (per launched ship)
+      - WaveProgressBar (compact inline variant)
+      - HealthBar (compact inline variant)
+      - StatusBadge
+      - NavigableToolbar
+
+    data_sources:
+      - source: fleet_state
+        description: "All ships with status, filtered to LAUNCHED + COMPLETE"
+      - source: wave_progress
+        description: "Per-ship wave completion"
+      - source: fleet_health
+        description: "Per-ship health metrics"
+      - source: pending_messages
+        description: "Pending question counts per ship"
+
+    keyboard_shortcuts:
+      Up/Down: "Navigate ship rows"
+      Tab: "Cycle focus: ship-status-grid -> navigable-toolbar"
+      Left/Right: "Navigate toolbar buttons (when toolbar focused)"
+      Enter: "Open Ship Bridge for selected ship (or activate toolbar button)"
+      i: "Open Message Center"
+      Escape: "Return to Fleet Overview"
+      "?": "Help overlay"
+
+    responsive_behavior:
+      standard:
+        min_width: 120
+        description: "Full single-row-per-ship layout with all metrics"
+      compact:
+        threshold: "<120 cols"
+        description: >
+          Ship rows truncate to: icon + name + wave bar + mission count.
+          Health and crew details available on drill-down only.
+
+  # ---------------------------------------------------------------------------
+  # VIEW 15: Project Settings (Global Configuration)
+  # ---------------------------------------------------------------------------
+  - id: project-settings
+    name: Project Settings
+    description: >
+      Global settings screen for configuring the orchestration system. This
+      view exists because the orchestration system is project-agnostic -- if
+      you launch from a different project, everything needs to be reconfigured.
+      Settings here are global (not per-project) so verification gates, crew
+      preferences, and fleet defaults carry across all projects.
+
+      Key sections:
+        1. Verification Gates -- configurable bash commands for linting, type-
+           checking, testing, and building. These are language-agnostic shell
+           commands that the Commander runs as gate steps (VERIFY_RED,
+           VERIFY_GREEN, VERIFY_REFACTOR, VERIFY_IMPLEMENT). By keeping them
+           as bash commands, the system works for any language/framework.
+        2. Crew Defaults -- default harness, model, WIP limits, max revisions,
+           stuck timeout, heartbeat interval.
+        3. Fleet Defaults -- default ship naming, wave strategy, merge policy.
+        4. Export/Import -- export ALL settings (fleet, crew, verification gates)
+           to a JSON file. Import from JSON in a different project to reload
+           everything as if you were in the original project (tasks/missions
+           are NOT exported -- only configuration).
+
+    layout:
+      structure: "SettingsHeader | SettingsTabs (100%) | NavigableToolbar"
+      rows:
+        - name: header
+          height: 2
+          panels:
+            - id: settings-header
+              width: "100%"
+              description: >
+                "PROJECT SETTINGS" in bold butterscotch. Shows the current
+                project path and config file location. If settings were
+                imported, shows "[imported from: <source>]" badge.
+
+        - name: settings-content
+          height: "fill"
+          panels:
+            - id: settings-tabs
+              width: "100%"
+              description: >
+                Tabbed panel with 4 sections, navigable with Left/Right
+                arrow keys on tab headers or number keys [1]-[4]:
+
+                TAB 1: Verification Gates
+                  Scrollable list of gate commands. Each gate is a named
+                  bash command with a label and the shell string:
+                    - test_command:       "go test ./..."
+                    - typecheck_command:   "go vet ./..."
+                    - lint_command:        "golangci-lint run"
+                    - build_command:       "go build ./..."
+                  The Admiral can add, edit, or remove gate commands.
+                  Each command is a raw bash string -- no language-specific
+                  logic. Variable substitution supported: {test_file},
+                  {worktree_dir}, {mission_id}.
+                  Uses Huh Input for editing, Huh Confirm for delete.
+
+                TAB 2: Crew Defaults
+                  Form fields for crew configuration:
+                    - Default harness: [claude | codex] (Huh Select)
+                    - Default model: [opus | sonnet | haiku] (Huh Select)
+                    - WIP limit: [1-5] (Huh Input with validation)
+                    - Max revisions per mission: [1-10] (Huh Input)
+                    - Stuck agent timeout: [60-600s] (Huh Input)
+                    - Heartbeat interval: [10-120s] (Huh Input)
+                    - Per-role overrides table (role -> harness + model)
+
+                TAB 3: Fleet Defaults
+                  Form fields for fleet configuration:
+                    - Ship naming convention: [auto | custom prefix]
+                    - Wave strategy: [sequential | parallel-max]
+                    - Merge policy: [manual | auto-on-review]
+                    - Demo token validation: [strict | lenient]
+
+                TAB 4: Export / Import
+                  Two primary actions:
+                    - [e] Export Settings: Serialize all settings (gates,
+                      crew, fleet) to a JSON file. Huh Input for file path
+                      (default: sc3-settings.json). Creates a portable
+                      config that can be used in any project.
+                    - [m] Import Settings: Huh FilePicker to select a
+                      JSON settings file. Preview of what will be imported
+                      shown in a viewport. Huh Confirm before applying.
+                      Imports everything EXCEPT tasks/missions/commissions.
+
+        - name: toolbar
+          height: 1
+          panels:
+            - id: navigable-toolbar
+              width: "100%"
+              description: >
+                NavigableToolbar component. Settings action buttons:
+                [1] Gates  [2] Crew  [3] Fleet  [4] Export  [?] Help  [Esc] Fleet
+                Tab number keys switch sections. Each button selectable
+                via shortcut key OR arrow + Enter.
+
+    components:
+      - SettingsHeader
+      - SettingsTabs (custom tabbed panel)
+      - GateCommandEditor (Huh Input + list)
+      - CrewDefaultsForm (Huh Form)
+      - FleetDefaultsForm (Huh Form)
+      - ExportImportPanel (Huh Input + FilePicker + Confirm)
+      - NavigableToolbar
+
+    data_sources:
+      - source: global_config
+        description: "Global sc3 configuration (not per-project)"
+      - source: gate_commands
+        description: "Configured verification gate bash commands"
+      - source: crew_defaults
+        description: "Default harness, model, limits"
+      - source: fleet_defaults
+        description: "Ship naming, wave strategy, merge policy"
+
+    keyboard_shortcuts:
+      "1": "Switch to Verification Gates tab"
+      "2": "Switch to Crew Defaults tab"
+      "3": "Switch to Fleet Defaults tab"
+      "4": "Switch to Export/Import tab"
+      Tab: "Cycle focus: settings-tabs -> navigable-toolbar"
+      Left/Right: "Navigate tab headers (in tabs) or toolbar buttons (in toolbar)"
+      Up/Down: "Navigate within tab content (gate list, form fields)"
+      Enter: "Edit selected item / activate button"
+      e: "Quick export (when on Export tab)"
+      m: "Quick import (when on Export tab)"
+      Escape: "Return to Fleet Overview"
+      "?": "Help overlay"
+
+    responsive_behavior:
+      standard:
+        min_width: 120
+        description: "Full tabbed layout with inline help text"
+      compact:
+        threshold: "<120 cols"
+        description: >
+          Tab headers abbreviated. Form fields stack vertically.
+          Gate command list shows command name only (edit to see full string).
+
+    notes:
+      - >
+        Verification gates are JUST bash commands. This is intentional --
+        it means the system works for Go, TypeScript, Python, Rust, or any
+        language without hardcoding language-specific logic. The Commander
+        runs these commands in the worktree directory and checks exit codes.
+      - >
+        Export/Import is the primary mechanism for reusing configuration
+        across projects. When you switch projects, you import your settings
+        file and everything (gates, crew preferences, fleet defaults) is
+        restored. Only tasks/missions are project-specific.
+      - >
+        Settings are stored globally at ~/.sc3/config.json (or the path
+        specified by SC3_CONFIG env var). They are NOT stored per-project.

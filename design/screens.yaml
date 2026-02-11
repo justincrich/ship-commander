@@ -1,0 +1,836 @@
+# Ship Commander 3 -- Screen Inventory
+# Hierarchical screen inventory with routing, parent/child relationships,
+# primary view assignments, and mode availability
+#
+# Screen types:
+#   root       -- Application root, not directly rendered
+#   mode       -- Top-level mode container (planning, execution)
+#   primary    -- Main content screen within a mode
+#   drill-down -- Full-screen detail replacing the primary view (stack-based)
+#   overlay    -- Modal/overlay rendered on top of the current screen
+#   global     -- Available from any screen regardless of mode
+#
+# Mode availability:
+#   basic     -- Simplified view for Junior Lieutenant persona
+#   advanced  -- Full LCARS experience for Staff Commander persona
+#   executive -- Aggregated metrics for Fleet Admiral persona
+
+version: "1.0"
+created: "2026-02-10"
+project: ship-commander-3
+
+# ---------------------------------------------------------------------------
+# Navigation Architecture
+# ---------------------------------------------------------------------------
+#
+# Screen Hierarchy:
+#
+#   app-root
+#   +-- fleet-overview (landing, primary)
+#   |   +-- fleet-monitor (drill-down, condensed multi-ship monitoring)
+#   +-- ship-bridge (per-ship, primary)
+#   |   +-- ready-room (drill-down, planning sessions)
+#   |   |   +-- plan-review (drill-down, coverage/dependency/approval)
+#   |   +-- agent-detail (drill-down from crew panel)
+#   |   +-- mission-detail (drill-down from mission board)
+#   |   +-- wave-manager (overlay)
+#   +-- agent-roster (top-level)
+#   +-- directive-editor (top-level)
+#   +-- message-center (top-level)
+#   +-- project-settings (top-level, global config)
+#   +-- admiral-question-modal (global overlay, any view)
+#   +-- help-overlay (global, any view)
+#   +-- onboarding-overlay (first-run only)
+#
+# Navigation Model:
+#   - Stack-based: Enter pushes, Escape pops
+#   - Overlays/modals render on top without pushing to stack
+#   - Mode transitions (planning -> execution) replace the stack
+#   - Global overlays (help, onboarding) are independent of mode
+
+navigation:
+  model: stack-based
+  max_depth: 3
+  transitions:
+    planning_to_execution:
+      trigger: "Admiral approves commission plan"
+      animation:
+        primary: "warp_engage (freq=12.0, ratio=0.4) -- full warp jump effect"
+        fallback: "view_switch (freq=8.0, ratio=1.0) -- simple crossfade for compact/executive"
+        description: "Star-streak warp jump marks the dramatic shift to execution"
+    execution_to_planning:
+      trigger: "Admiral starts new commission or resumes shelved plan"
+      animation:
+        primary: "warp_decelerate (freq=6.0, ratio=1.0) -- smooth arrival from warp"
+        fallback: "view_switch (freq=8.0, ratio=1.0) -- simple crossfade for compact/executive"
+        description: "Drop out of warp effect as planning dashboard materializes"
+
+# ---------------------------------------------------------------------------
+# Screen Definitions
+# ---------------------------------------------------------------------------
+
+screens:
+
+  # =========================================================================
+  # APP ROOT
+  # =========================================================================
+  - id: app-root
+    name: Application Root
+    type: root
+    description: >
+      The top-level application container. Manages the navigation stack,
+      global overlays, and the Bubble Tea program lifecycle. Not directly
+      rendered -- delegates to the Fleet Overview as the landing screen.
+      There are no separate "modes" -- the Admiral navigates a unified
+      fleet-centric hierarchy with stack-based drill-downs.
+    route: "sc3 tui"
+    parent: null
+    children:
+      - fleet-overview
+      - ship-bridge
+      - agent-roster
+      - directive-editor
+      - message-center
+      - project-settings
+      - admiral-question-modal
+      - help-overlay
+      - onboarding-overlay
+    primary_view: fleet-overview
+    mode_availability:
+      basic: true
+      advanced: true
+      executive: true
+    state:
+      - navigation_stack: "[]"
+      - global_overlay: "help | onboarding | null"
+      - pending_questions: "[]"
+      - theme_mode: "basic | advanced | executive"
+
+  # =========================================================================
+  # FLEET OVERVIEW (Landing Screen)
+  # =========================================================================
+  - id: fleet-overview
+    name: Fleet Overview
+    type: primary
+    description: >
+      The Admiral's command center. Landing screen showing all commissioned
+      ships. The Admiral manages their fleet at a high level from here.
+      Fleet-wide metrics are shown inline in the header (no separate
+      FleetSummary row).
+    route: "sc3 tui"
+    parent: app-root
+    children:
+      - ship-bridge
+      - fleet-monitor
+      - agent-roster
+      - directive-editor
+      - message-center
+      - project-settings
+    primary_view: fleet-overview
+    mode_availability:
+      basic: true
+      advanced: true
+      executive: true
+    mode_differences:
+      basic:
+        - "Ship preview panel hidden; Enter drills directly into Ship Bridge"
+        - "Fleet metrics show totals only (no per-ship breakdown)"
+        - "Inline hints enabled"
+      advanced:
+        - "Full two-column layout with ship preview"
+        - "Fleet metrics show full breakdown"
+      executive:
+        - "Ship list shows condensed rows (like Fleet Monitor)"
+        - "Fleet metrics prominent with health scores"
+
+  # =========================================================================
+  # FLEET MONITOR (Condensed Multi-Ship Monitoring)
+  # =========================================================================
+  - id: fleet-monitor
+    name: Fleet Monitor
+    type: drill-down
+    description: >
+      Condensed, real-time monitoring view showing all LAUNCHED ships.
+      Each ship is a single row with inline progress, crew health, and
+      wave status. For passive monitoring during execution.
+    route: "Press 'm' on Fleet Overview"
+    parent: fleet-overview
+    children: []
+    primary_view: fleet-monitor
+    mode_availability:
+      basic: false
+      advanced: true
+      executive: true
+    navigation:
+      entry: "Press 'm' on Fleet Overview"
+      exit: "Escape returns to Fleet Overview"
+    mode_differences:
+      advanced:
+        - "Full single-row-per-ship with all metrics"
+      executive:
+        - "Same layout with health scores emphasized"
+
+  # =========================================================================
+  # SHIP BRIDGE (Per-Ship Dashboard)
+  # =========================================================================
+  - id: ship-bridge
+    name: Ship Bridge
+    type: drill-down
+    description: >
+      Per-ship monitoring and control view. Shows crew, missions, event log.
+      The tactical row (PhaseTracker + WaveProgress) has been removed --
+      wave summary is inline in the header, and detailed phase tracking
+      lives in Mission Detail.
+    route: "Enter on ship in Fleet Overview"
+    parent: fleet-overview
+    children:
+      - ready-room
+      - agent-detail
+      - mission-detail
+      - wave-manager
+    primary_view: ship-bridge
+    mode_availability:
+      basic: true
+      advanced: true
+      executive: true
+    navigation:
+      entry: "Enter on selected ship in Fleet Overview"
+      exit: "Escape returns to Fleet Overview"
+    mode_differences:
+      basic:
+        - "EventLog reduced to 4 lines, info events filtered"
+        - "AgentGrid shows simplified cards (role + mission + status only)"
+        - "MissionBoard shows column counts only (no per-mission list)"
+        - "Inline hints enabled"
+      advanced:
+        - "All panels visible with full detail"
+        - "EventLog shows 8-12 lines, all severity levels"
+        - "AgentGrid shows full cards with phase, elapsed, harness"
+        - "MissionBoard shows per-mission details"
+        - "Harmonica animations enabled for phase transitions"
+      executive:
+        - "AgentGrid collapsed to summary: 'Agents: N active, M stuck'"
+        - "MissionBoard shows column counts only with progress percentage"
+        - "EventLog shows only warnings and errors"
+        - "System health metrics prominent in header"
+        - "No animations"
+
+  # =========================================================================
+  # READY ROOM (Directive Planning)
+  # =========================================================================
+  - id: ready-room
+    name: Ready Room
+    type: drill-down
+    description: >
+      Captain's Ready Room for planning. Shows crew planning sessions and
+      directive content. Coverage and dependency analysis moved to Plan
+      Review (its own view) to keep this screen focused.
+    route: "Press 'p' on Ship Bridge"
+    parent: ship-bridge
+    children:
+      - specialist-detail
+      - plan-review
+    primary_view: ready-room
+    mode_availability:
+      basic: true
+      advanced: true
+      executive: false
+    navigation:
+      entry: "Press 'p' on Ship Bridge with assigned directive"
+      exit: "Escape returns to Ship Bridge"
+    mode_differences:
+      basic:
+        - "Directive sidebar starts hidden (toggle with [t])"
+        - "Specialist output truncated to status line only"
+        - "Inline hints enabled"
+      advanced:
+        - "Directive sidebar visible by default"
+        - "Specialist output shows last 3-5 lines"
+
+  - id: specialist-detail
+    name: Specialist Detail
+    type: drill-down
+    description: >
+      Full-screen drill-down into a single specialist agent session.
+      Shows full output viewport, sign-off status, and message history.
+    route: "Enter on specialist panel in Ready Room"
+    parent: ready-room
+    children: []
+    primary_view: agent-detail
+    mode_availability:
+      basic: true
+      advanced: true
+      executive: false
+    navigation:
+      entry: "Enter on selected specialist panel"
+      exit: "Escape returns to Ready Room"
+
+  # =========================================================================
+  # PLAN REVIEW (Promoted from Overlay to Full-Screen View)
+  # =========================================================================
+  - id: plan-review
+    name: Plan Review
+    type: drill-down
+    description: >
+      Full-screen drill-down for reviewing the mission manifest, coverage
+      matrix, and dependency graph. Promoted from a modal overlay to its
+      own view to avoid cluttering the Ready Room. The Admiral navigates
+      here via [v] from Ready Room, or automatically when consensus is
+      reached. Approval/feedback/shelve actions available here.
+    route: "Press 'v' on Ready Room, or automatic when consensus reached"
+    parent: ready-room
+    children: []
+    primary_view: plan-review
+    mode_availability:
+      basic: true
+      advanced: true
+      executive: false
+    navigation:
+      entry: "Press 'v' on Ready Room or automatic on consensus"
+      exit: "Escape returns to Ready Room"
+    mode_differences:
+      basic:
+        - "Dependency graph section hidden"
+        - "Mission list shows title + classification only (no AC detail)"
+        - "Inline explanation of approve/feedback/shelve options"
+      advanced:
+        - "Full mission detail with AC counts, surface areas, use-case refs"
+        - "Dependency graph and full coverage breakdown visible"
+
+  # =========================================================================
+  # DRILL-DOWNS (Shared across views)
+  # =========================================================================
+  - id: agent-detail
+    name: Agent Detail
+    type: drill-down
+    description: >
+      Full-screen drill-down for a single agent. Shows agent info, real-time
+      output viewport, error context, and action controls (halt/retry/ignore).
+    route: "Enter on agent in crew panel"
+    parent: ship-bridge
+    children: []
+    primary_view: agent-detail
+    mode_availability:
+      basic: true
+      advanced: true
+      executive: true
+    navigation:
+      entry: "Enter on selected agent in crew panel"
+      exit: "Escape returns to Ship Bridge or Ready Room"
+    mode_differences:
+      basic:
+        - "Output viewport shows last 20 lines only"
+        - "Error context includes plain-language explanation"
+        - "Action confirmation dialogs include explanatory text"
+      advanced:
+        - "Output viewport shows full capture (scrollable)"
+        - "Error context shows raw gate output"
+      executive:
+        - "Same as basic but with less output context"
+
+  - id: mission-detail
+    name: Mission Detail
+    type: drill-down
+    description: >
+      Full-screen drill-down for a single mission. Shows mission spec,
+      AC list with full TDD phase pipelines (absorbed from the removed
+      Ship Bridge tactical row), gate evidence, demo token preview,
+      and available actions.
+    route: "Enter on mission in MissionBoard"
+    parent: ship-bridge
+    children: []
+    primary_view: mission-detail
+    mode_availability:
+      basic: true
+      advanced: true
+      executive: true
+    navigation:
+      entry: "Enter on selected mission in MissionBoard"
+      exit: "Escape returns to Ship Bridge"
+    mode_differences:
+      basic:
+        - "Gate evidence shows summary only (pass/fail counts)"
+        - "Demo token shows validation status only, not full content"
+        - "AC list shows current phase only (not full pipeline)"
+      advanced:
+        - "Full gate evidence table with output snippets"
+        - "Demo token rendered via Glamour with full content"
+        - "AC list shows complete 6-dot pipeline with inline gate results"
+      executive:
+        - "Mission summary only: status, progress percentage, gate pass rate"
+        - "No AC-level detail unless drilled further"
+
+  - id: wave-manager
+    name: Wave Manager
+    type: overlay
+    description: >
+      Overlay for reviewing wave execution and batch-merging completed
+      missions. Shows all waves with progress, per-mission status,
+      conflict detection, and merge controls.
+    route: "Press 'w' on Ship Bridge"
+    parent: ship-bridge
+    children: []
+    primary_view: wave-manager
+    mode_availability:
+      basic: false
+      advanced: true
+      executive: true
+    overlay_behavior:
+      dismissable: true
+      dismiss_key: Escape
+      keyboard_capture: true
+      background: dimmed
+      size: "95% width, 90% height"
+      animation:
+        open: "modal_open (freq=6.0, ratio=0.8) -- slides in with bounce"
+        close: "modal_close (freq=10.0, ratio=1.0) -- crisp slide out"
+    mode_differences:
+      advanced:
+        - "Full per-mission detail with conflict file lists"
+        - "Post-merge verification gate results shown inline"
+      executive:
+        - "Wave summary with batch merge controls only"
+        - "Per-mission detail available on drill-down"
+
+  # =========================================================================
+  # PROJECT SETTINGS (Global Configuration)
+  # =========================================================================
+  - id: project-settings
+    name: Project Settings
+    type: top-level
+    description: >
+      Global configuration screen. Verification gates (bash commands for
+      linting, typechecking, testing, building) are configured here and
+      apply across all projects. Crew defaults (harness, model, limits)
+      and fleet defaults (naming, wave strategy, merge policy) are also
+      set here. Export/import allows carrying settings between projects.
+    route: "Press 's' on Fleet Overview"
+    parent: fleet-overview
+    children: []
+    primary_view: project-settings
+    mode_availability:
+      basic: true
+      advanced: true
+      executive: true
+    navigation:
+      entry: "Press 's' on Fleet Overview or via NavigableToolbar"
+      exit: "Escape returns to Fleet Overview"
+    mode_differences:
+      basic:
+        - "Simplified gate editor with one-field-per-line"
+        - "Crew/fleet defaults show essential fields only"
+        - "Export/import has guided wizard flow"
+      advanced:
+        - "Full tabbed interface with all configuration options"
+        - "Per-role overrides table visible"
+        - "Raw JSON preview available for export"
+      executive:
+        - "Same as advanced"
+    notes:
+      - >
+        Settings are stored globally (not per-project) so they persist
+        when switching between projects. Verification gates are bash
+        commands -- no language-specific logic hardcoded.
+      - >
+        Export creates a portable JSON file with all settings.
+        Import restores settings from JSON, excluding tasks/missions.
+
+  # =========================================================================
+  # SHARED OVERLAYS (Available in any mode)
+  # =========================================================================
+  - id: admiral-question-modal
+    name: Admiral Question Modal
+    type: overlay
+    description: >
+      Modal overlay for agent-to-Admiral questions. Can appear in any mode
+      (planning or execution) whenever an agent surfaces a question. Steals
+      all keyboard input until answered.
+    route: "Automatic when ADMIRAL_QUESTION event fires"
+    parent: app-root
+    children: []
+    primary_view: admiral-question-modal
+    mode_availability:
+      basic: true
+      advanced: true
+      executive: true
+    overlay_behavior:
+      dismissable: false
+      keyboard_capture: true
+      background: dimmed
+      size: "60% width, auto height"
+      animation: "Harmonica under-damped spring (ratio=0.8) on open"
+    mode_differences:
+      basic:
+        - "Question text includes simplified context explanation"
+        - "Options include descriptive subtext"
+      advanced:
+        - "Full question context with Glamour markdown rendering"
+      executive:
+        - "Compact question presentation, options only"
+
+  # =========================================================================
+  # GLOBAL SCREENS
+  # =========================================================================
+  - id: help-overlay
+    name: Help Overlay
+    type: global
+    description: >
+      Context-aware help overlay showing keyboard shortcuts organized by
+      section. Available from any screen via '?' key. Does not push to
+      navigation stack -- toggles on/off.
+    route: "Press '?' from any screen"
+    parent: app-root
+    children: []
+    primary_view: help-overlay
+    mode_availability:
+      basic: true
+      advanced: true
+      executive: true
+    overlay_behavior:
+      dismissable: true
+      dismiss_key: "? or Escape"
+      keyboard_capture: true
+      background: dimmed
+      size: "70% width, auto height"
+      animation:
+        open: "modal_open (freq=6.0, ratio=0.8) -- fades in with bounce"
+        close: "modal_close (freq=10.0, ratio=1.0) -- fades out fast"
+    notes:
+      - "Content adapts to the active view -- only shows relevant shortcuts"
+      - "Does not interfere with the navigation stack"
+      - "Cannot be opened while another modal is active (question or approval)"
+
+  - id: onboarding-overlay
+    name: Onboarding Overlay
+    type: global
+    description: >
+      First-run onboarding tour that guides the Junior Lieutenant through
+      the TUI panels and concepts. Step-by-step carousel with panel
+      highlights. Only appears on first launch (no prior state exists).
+    route: "Automatic on first launch when no .beads/ directory exists"
+    parent: app-root
+    children: []
+    primary_view: null
+    mode_availability:
+      basic: true
+      advanced: false
+      executive: false
+    overlay_behavior:
+      dismissable: true
+      dismiss_key: Escape
+      keyboard_capture: true
+      background: "highlighted panel regions"
+      size: "50% width tooltip anchored to highlighted panel"
+    trigger_conditions:
+      - "First launch: no .beads/ directory and no sc3.toml exists"
+      - "Or explicitly: 'sc3 tui --onboarding'"
+    notes:
+      - "5-step tour: Agent Grid, Mission Board, Event Log, Command Bar, Navigation"
+      - "After completion, basic mode is activated by default"
+      - "Can be re-triggered with 'sc3 tui --onboarding'"
+      - "Skipping (Escape) still activates basic mode"
+
+# ---------------------------------------------------------------------------
+# Screen Transition Map
+# ---------------------------------------------------------------------------
+# Defines all legal transitions between screens
+
+transitions:
+  # -- Harmonica Animation Presets (from tokens.yaml) --------------------------
+  # view_switch:  freq=8.0, ratio=1.0  (critically-damped, snappy, no overshoot)
+  # modal_open:   freq=6.0, ratio=0.8  (under-damped, gentle bounce on arrival)
+  # modal_close:  freq=10.0, ratio=1.0 (critically-damped, fast dismiss)
+  # alert_pulse:  freq=4.0, ratio=0.3  (under-damped, oscillating attention)
+  #
+  # Convention:
+  #   push/pop      -> view_switch (content slides in/out)
+  #   overlay_open  -> modal_open  (overlay scales + fades with bounce)
+  #   overlay_close -> modal_close (overlay fades out fast)
+  #   mode_transition -> view_switch (full screen crossfade)
+  #   overlay_toggle -> modal_open on show, modal_close on hide
+
+  # -- Fleet Overview drill-downs ------------------------------------------------
+  - from: fleet-overview
+    to: ship-bridge
+    trigger: "Enter on ship in ship list"
+    type: push
+    animation:
+      preset: view_switch
+      property: content_offset_x
+      direction: "slide-right"
+      description: "Ship Bridge slides in from the right"
+
+  - from: ship-bridge
+    to: fleet-overview
+    trigger: Escape
+    type: pop
+    animation:
+      preset: view_switch
+      property: content_offset_x
+      direction: "slide-left"
+      description: "Ship Bridge slides out, Fleet Overview returns"
+
+  - from: fleet-overview
+    to: fleet-monitor
+    trigger: "Press 'm'"
+    type: push
+    animation:
+      preset: view_switch
+      property: content_offset_x
+      direction: "slide-right"
+      description: "Fleet Monitor slides in from the right"
+
+  - from: fleet-monitor
+    to: fleet-overview
+    trigger: Escape
+    type: pop
+    animation:
+      preset: view_switch
+      property: content_offset_x
+      direction: "slide-left"
+      description: "Fleet Monitor slides out, Fleet Overview returns"
+
+  # -- Fleet Overview -> Project Settings ----------------------------------------
+  - from: fleet-overview
+    to: project-settings
+    trigger: "Press 's'"
+    type: push
+    animation:
+      preset: view_switch
+      property: content_offset_x
+      direction: "slide-right"
+      description: "Project Settings slides in from the right"
+
+  - from: project-settings
+    to: fleet-overview
+    trigger: Escape
+    type: pop
+    animation:
+      preset: view_switch
+      property: content_offset_x
+      direction: "slide-left"
+      description: "Project Settings slides out, Fleet Overview returns"
+
+  # -- Ship Bridge drill-downs ------------------------------------------------
+  - from: ship-bridge
+    to: ready-room
+    trigger: "Press 'p'"
+    type: push
+    animation:
+      preset: view_switch
+      property: content_offset_x
+      direction: "slide-right"
+      description: "Ready Room slides in from the right"
+
+  - from: ready-room
+    to: ship-bridge
+    trigger: Escape
+    type: pop
+    animation:
+      preset: view_switch
+      property: content_offset_x
+      direction: "slide-left"
+      description: "Ready Room slides out, Ship Bridge returns"
+
+  - from: ship-bridge
+    to: agent-detail
+    trigger: "Enter on agent in crew panel"
+    type: push
+    animation:
+      preset: view_switch
+      property: content_offset_x
+      direction: "slide-right"
+      description: "Agent detail slides in from the right"
+
+  - from: agent-detail
+    to: ship-bridge
+    trigger: Escape
+    type: pop
+    animation:
+      preset: view_switch
+      property: content_offset_x
+      direction: "slide-left"
+      description: "Agent detail slides out, Ship Bridge returns"
+
+  - from: ship-bridge
+    to: mission-detail
+    trigger: "Enter on mission in MissionBoard"
+    type: push
+    animation:
+      preset: view_switch
+      property: content_offset_x
+      direction: "slide-right"
+      description: "Mission detail slides in from the right"
+
+  - from: mission-detail
+    to: ship-bridge
+    trigger: Escape
+    type: pop
+    animation:
+      preset: view_switch
+      property: content_offset_x
+      direction: "slide-left"
+      description: "Mission detail slides out, Ship Bridge returns"
+
+  # -- Ready Room drill-downs ------------------------------------------------
+  - from: ready-room
+    to: specialist-detail
+    trigger: "Enter on specialist panel"
+    type: push
+    animation:
+      preset: view_switch
+      property: content_offset_x
+      direction: "slide-right"
+      description: "Specialist detail slides in from the right"
+
+  - from: specialist-detail
+    to: ready-room
+    trigger: Escape
+    type: pop
+    animation:
+      preset: view_switch
+      property: content_offset_x
+      direction: "slide-left"
+      description: "Specialist detail slides out, Ready Room returns"
+
+  - from: ready-room
+    to: plan-review
+    trigger: "Press 'v' or automatic when consensus reached"
+    type: push
+    animation:
+      preset: view_switch
+      property: content_offset_x
+      direction: "slide-right"
+      description: "Plan Review slides in from the right"
+
+  - from: plan-review
+    to: ready-room
+    trigger: "Escape or 'Feedback' selected (reconvene)"
+    type: pop
+    animation:
+      preset: view_switch
+      property: content_offset_x
+      direction: "slide-left"
+      description: "Plan Review slides out, Ready Room returns"
+
+  # -- Plan approval -> Ship launch (warp jump) --------------------------------
+  - from: plan-review
+    to: ship-bridge
+    trigger: "Approve selected"
+    type: pop_to
+    animation:
+      preset: warp_engage
+      property: "content_scale_x + content_scale_y + star_streaks"
+      description: >
+        WARP JUMP: Full-screen warp effect when plan is approved.
+        Plan Review compresses horizontally, star-streak characters
+        (━ ═ ─) race across viewport in butterscotch->white, then content
+        snaps to Ship Bridge with overshoot bounce. The most dramatic
+        transition in the TUI -- marks the shift from planning to execution.
+        Uses warp_engage spring (freq=12.0, ratio=0.4). The navigation
+        stack pops back to Ship Bridge (clearing Ready Room + Plan Review).
+      fallback: "view_switch crossfade if terminal < 120 cols or executive mode"
+
+  # -- Wave manager overlay ----------------------------------------------------
+  - from: ship-bridge
+    to: wave-manager
+    trigger: "Press 'w'"
+    type: overlay_open
+    animation:
+      preset: modal_open
+      property: "opacity + scale"
+      description: "Wave manager overlay bounces in"
+
+  - from: wave-manager
+    to: ship-bridge
+    trigger: Escape
+    type: overlay_close
+    animation:
+      preset: modal_close
+      property: "opacity + scale"
+      description: "Wave manager fades out fast"
+
+  # -- Admiral question modal --------------------------------------------------
+  - from: any
+    to: admiral-question-modal
+    trigger: "ADMIRAL_QUESTION event"
+    type: overlay_open
+    animation:
+      preset: modal_open
+      property: "opacity + scale"
+      description: "Question modal bounces in to grab attention"
+
+  - from: admiral-question-modal
+    to: previous
+    trigger: "Form submitted"
+    type: overlay_close
+    animation:
+      preset: modal_close
+      property: "opacity + scale"
+      description: "Question modal dismissed crisply after answer"
+
+  # -- Help overlay toggle -----------------------------------------------------
+  - from: any
+    to: help-overlay
+    trigger: "Press '?'"
+    type: overlay_toggle
+    animation:
+      preset: modal_open
+      property: "opacity + scale"
+      description: "Help overlay bounces in on toggle-show"
+
+  - from: help-overlay
+    to: previous
+    trigger: "Press '?' or Escape"
+    type: overlay_toggle
+    animation:
+      preset: modal_close
+      property: "opacity + scale"
+      description: "Help overlay fades out on toggle-hide"
+
+# ---------------------------------------------------------------------------
+# Library References
+# ---------------------------------------------------------------------------
+# Agents implementing from this file MUST use these exact imports and APIs.
+
+references:
+  - name: bubbletea
+    package: "github.com/charmbracelet/bubbletea"
+    version: ">=1.2.0"
+    url: "https://github.com/charmbracelet/bubbletea"
+    used_for: "Elm architecture TUI framework -- all screens are tea.Model"
+    api_used:
+      - "tea.Model interface (Init, Update, View)"
+      - "tea.Cmd, tea.Msg for event dispatch"
+      - "tea.WindowSizeMsg for responsive breakpoints"
+      - "tea.KeyMsg for navigation triggers"
+
+  - name: lipgloss
+    package: "github.com/charmbracelet/lipgloss"
+    version: ">=1.0.0"
+    url: "https://github.com/charmbracelet/lipgloss"
+    used_for: "Layout composition, styling, border rendering"
+    api_used:
+      - "lipgloss.Place(w, h, hPos, vPos, str) -- overlay centering"
+      - "lipgloss.JoinVertical/JoinHorizontal -- screen layout"
+      - "lipgloss.NewStyle().Faint(true) -- dimmed background behind overlays"
+
+  - name: harmonica
+    package: "github.com/charmbracelet/harmonica"
+    version: ">=0.2.0"
+    url: "https://github.com/charmbracelet/harmonica"
+    used_for: "All screen transition animations"
+    api_used:
+      - "harmonica.NewSpring(frequency, dampingRatio) -- create spring from preset"
+      - "spring.Update(target, velocity, dt) -- per-frame tick via tea.Tick"
+      - "harmonica.FPS(60) -- time delta for 60 FPS tick rate"
+    presets_used:
+      - "view_switch (freq=8.0, ratio=1.0) -- push/pop drill-downs, fallback transitions"
+      - "modal_open (freq=6.0, ratio=0.8) -- overlay entrance with bounce"
+      - "modal_close (freq=10.0, ratio=1.0) -- overlay dismissal, fast and crisp"
+      - "warp_engage (freq=12.0, ratio=0.4) -- planning->execution mode transition (star-streak warp)"
+      - "warp_decelerate (freq=6.0, ratio=1.0) -- execution->planning mode transition (drop from warp)"
+      - "beam_materialize (freq=5.0, ratio=0.7) -- agent/mission spawning (transporter shimmer)"
+      - "beam_dematerialize (freq=7.0, ratio=0.7) -- agent/mission removal (transporter out)"
+      - "red_alert_klaxon (freq=3.0, ratio=0.15) -- critical state sustained red oscillation"
+      - "shields_up (freq=8.0, ratio=0.5) -- gate pass / approval bright flash"

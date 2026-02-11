@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admiral Question Modal - Ship Commander 3 TUI</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #1a1a2e;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.4;
+            color: #F5F6FA;
+            padding: 40px 20px;
+            overflow-x: hidden;
+        }
+
+        .terminal-frame {
+            max-width: 1100px;
+            margin: 0 auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            border-radius: 8px;
+            background: #2D2D2D;
+        }
+
+        .title-bar {
+            background: #2D2D2D;
+            padding: 12px 16px;
+            border-radius: 8px 8px 0 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .dots {
+            display: flex;
+            gap: 8px;
+        }
+
+        .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .dot.red { background: #FF5F56; }
+        .dot.yellow { background: #FFBD2E; }
+        .dot.green { background: #27C93F; }
+
+        .window-title {
+            flex: 1;
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+        }
+
+        .terminal-body {
+            background: #000000;
+            border-radius: 0 0 8px 8px;
+            padding: 24px;
+            min-height: 600px;
+            position: relative;
+        }
+
+        /* Dimmed background content */
+        .background-view {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            padding: 24px;
+            opacity: 0.15;
+            color: #F5F6FA;
+            pointer-events: none;
+        }
+
+        .bg-header {
+            font-weight: bold;
+            margin-bottom: 12px;
+            color: #FF9966;
+        }
+
+        .bg-content {
+            white-space: pre;
+        }
+
+        /* Modal overlay */
+        .modal-overlay {
+            position: relative;
+            width: 60%;
+            margin: 60px auto;
+            z-index: 10;
+        }
+
+        .modal-container {
+            border: 2px solid #FFAA00;
+            border-style: double;
+            background: #000000;
+            padding: 16px;
+        }
+
+        .modal-header {
+            margin-bottom: 12px;
+        }
+
+        .modal-title {
+            color: #FF9966;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+
+        .modal-ship-info {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-top: 6px;
+        }
+
+        .ship-name {
+            color: #52526A;
+            font-size: 11px;
+        }
+
+        .badge {
+            padding: 2px 8px;
+            font-size: 10px;
+            font-weight: bold;
+            border-radius: 2px;
+            letter-spacing: 0.5px;
+        }
+
+        .badge.role {
+            background: #9999CC;
+            color: #000000;
+        }
+
+        .badge.domain {
+            background: #FF9966;
+            color: #000000;
+        }
+
+        /* Question content */
+        .question-content {
+            margin: 16px 0;
+            color: #F5F6FA;
+            line-height: 1.6;
+            padding: 12px 0;
+        }
+
+        /* Options list */
+        .options-list {
+            margin: 16px 0;
+            padding: 8px 0;
+        }
+
+        .option-item {
+            padding: 6px 8px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .option-item.selected {
+            background: rgba(153, 102, 255, 0.2);
+            color: #9966FF;
+        }
+
+        .option-item:not(.selected) {
+            color: #CCCCCC;
+        }
+
+        .option-cursor {
+            display: inline-block;
+            width: 16px;
+        }
+
+        /* Free text input */
+        .free-text-section {
+            margin: 16px 0;
+        }
+
+        .input-label {
+            color: #52526A;
+            margin-bottom: 4px;
+            font-size: 12px;
+        }
+
+        .text-input {
+            width: 100%;
+            background: rgba(153, 153, 204, 0.1);
+            border: 1px solid #52526A;
+            color: #F5F6FA;
+            padding: 8px 12px;
+            font-family: inherit;
+            font-size: 13px;
+            border-radius: 2px;
+            outline: none;
+        }
+
+        .text-input::placeholder {
+            color: #52526A;
+        }
+
+        .text-input:focus {
+            border-color: #9999CC;
+            background: rgba(153, 153, 204, 0.15);
+        }
+
+        /* Broadcast toggle */
+        .broadcast-section {
+            margin: 16px 0;
+            color: #CCCCCC;
+        }
+
+        .checkbox {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 1px solid #52526A;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        /* Submit hint */
+        .submit-hint {
+            text-align: center;
+            color: #52526A;
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 1px solid #1B4F8F;
+        }
+
+        /* Border decorations */
+        .border-top {
+            color: #FFAA00;
+            margin-bottom: 8px;
+        }
+
+        .border-bottom {
+            color: #FFAA00;
+            margin-top: 8px;
+        }
+
+        /* Animations */
+        @keyframes modalBounce {
+            0% {
+                transform: scale(0.9);
+                opacity: 0;
+            }
+            60% {
+                transform: scale(1.05);
+            }
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .modal-container {
+            animation: modalBounce 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal-frame">
+        <div class="title-bar">
+            <div class="dots">
+                <div class="dot red"></div>
+                <div class="dot yellow"></div>
+                <div class="dot green"></div>
+            </div>
+            <div class="window-title">sc3 tui</div>
+        </div>
+
+        <div class="terminal-body">
+            <!-- Dimmed background view -->
+            <div class="background-view">
+                <div class="bg-header">╔═══════════════════════════════════════════════════════════════════════════╗</div>
+                <div class="bg-header">║                          SHIP BRIDGE - USS ENTERPRISE                     ║</div>
+                <div class="bg-header">╚═══════════════════════════════════════════════════════════════════════════╝</div>
+                <div class="bg-content">
+│ CREW ROSTER                                                               │
+│                                                                           │
+│  Commander Data          ● ACTIVE    Technical Domain                    │
+│  Lt. Cmdr. La Forge      ● ACTIVE    Engineering Domain                  │
+│  Ensign Kim              ● IDLE      Operations Domain                   │
+│                                                                           │
+│ ACTIVE MISSIONS                                                           │
+│                                                                           │
+│  Mission #042: Authentication Module Development                         │
+│  Status: IN PROGRESS | Assigned: Cmdr. Data                              │
+│                                                                           │
+│ SYSTEM STATUS                                                             │
+│  ▓▓▓▓▓▓▓▓▓▓░░░░░ 67% System Resources                                    │
+│  ▓▓▓▓▓▓▓▓▓▓▓▓▓░░ 89% Crew Efficiency                                     │
+                </div>
+            </div>
+
+            <!-- Modal overlay -->
+            <div class="modal-overlay">
+                <div class="modal-container">
+                    <!-- Header -->
+                    <div class="modal-header">
+                        <div class="border-top">╔══════════════════════════════════════════════════════════════════════╗</div>
+                        <div class="modal-title">║  ADMIRAL -- QUESTION FROM Cmdr. Data                                 ║</div>
+                        <div class="modal-ship-info">
+                            <div class="ship-name">║  USS Enterprise</div>
+                            <div class="badge role">COMMANDER</div>
+                            <div class="badge domain">TECHNICAL</div>
+                        </div>
+                        <div class="border-bottom">╚══════════════════════════════════════════════════════════════════════╝</div>
+                    </div>
+
+                    <!-- Question content -->
+                    <div class="question-content">
+                        <strong>Question:</strong><br><br>
+                        The authentication module requires a session store. Which approach should I<br>
+                        use for the JWT token storage?
+                    </div>
+
+                    <!-- Options list -->
+                    <div class="options-list">
+                        <div class="option-item selected">
+                            <span class="option-cursor">></span> Redis-backed session store (recommended for production)
+                        </div>
+                        <div class="option-item">
+                            <span class="option-cursor"> </span> Browser localStorage with httpOnly cookies
+                        </div>
+                        <div class="option-item">
+                            <span class="option-cursor"> </span> In-memory store (simplest, no persistence)
+                        </div>
+                        <div class="option-item">
+                            <span class="option-cursor"> </span> Database-backed sessions
+                        </div>
+                    </div>
+
+                    <!-- Free text input -->
+                    <div class="free-text-section">
+                        <div class="input-label">Or provide a custom response:</div>
+                        <input type="text" class="text-input" placeholder="Type a custom response...">
+                    </div>
+
+                    <!-- Broadcast toggle -->
+                    <div class="broadcast-section">
+                        <span class="checkbox">[ ]</span> Broadcast answer to all crew?
+                    </div>
+
+                    <!-- Submit hint -->
+                    <div class="submit-hint">
+                        Press Enter to submit
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

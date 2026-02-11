@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mission Detail - Ship Commander 3 Mockup</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #1a1a2e;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+            padding: 40px 20px;
+            color: #F5F6FA;
+        }
+
+        .terminal-window {
+            max-width: 1100px;
+            margin: 0 auto;
+            border-radius: 8px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+        }
+
+        .title-bar {
+            background: #2D2D2D;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .window-controls {
+            display: flex;
+            gap: 8px;
+            margin-right: 16px;
+        }
+
+        .window-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .dot-close { background: #FF5F56; }
+        .dot-minimize { background: #FFBD2E; }
+        .dot-maximize { background: #27C93F; }
+
+        .window-title {
+            flex: 1;
+            text-align: center;
+            color: #CCCCCC;
+            font-size: 13px;
+            margin-left: -80px;
+        }
+
+        .terminal-body {
+            background: #000000;
+            padding: 20px;
+            font-size: 13px;
+            line-height: 1.4;
+            border-radius: 0 0 8px 8px;
+            min-height: 600px;
+        }
+
+        .mission-header {
+            border: 1px solid #9999CC;
+            border-radius: 6px;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+        }
+
+        .header-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .header-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .mission-title {
+            color: #FF9966;
+            font-weight: bold;
+            font-size: 15px;
+            margin-right: 12px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+
+        .badge-standard {
+            background: #1B4F8F;
+            color: #9999CC;
+        }
+
+        .badge-status {
+            background: #52526A;
+            color: #FF9966;
+        }
+
+        .badge-valid {
+            background: #1B4F8F;
+            color: #33FF33;
+        }
+
+        .header-field {
+            color: #CCCCCC;
+            margin-right: 16px;
+        }
+
+        .header-label {
+            color: #52526A;
+        }
+
+        .header-value {
+            color: #F5F6FA;
+        }
+
+        .content-area {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 16px;
+            min-height: 450px;
+        }
+
+        .panel {
+            border: 1px solid #9999CC;
+            border-radius: 6px;
+            padding: 12px;
+            overflow-y: auto;
+        }
+
+        .panel-ac {
+            flex: 0 0 40%;
+        }
+
+        .panel-gate {
+            flex: 0 0 30%;
+        }
+
+        .panel-demo {
+            flex: 0 0 30%;
+        }
+
+        .panel-title {
+            color: #9999CC;
+            font-weight: bold;
+            margin-bottom: 12px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #52526A;
+        }
+
+        .ac-item {
+            margin-bottom: 10px;
+            padding: 8px;
+            border-radius: 4px;
+            background: rgba(153, 153, 204, 0.05);
+        }
+
+        .ac-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .ac-index {
+            color: #9999CC;
+            font-weight: bold;
+            margin-right: 10px;
+            min-width: 30px;
+        }
+
+        .ac-title {
+            color: #F5F6FA;
+            flex: 1;
+        }
+
+        .phase-pipeline {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-left: 40px;
+            font-size: 16px;
+        }
+
+        .phase-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .phase-complete {
+            background: #33FF33;
+        }
+
+        .phase-active {
+            background: #FF9966;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .phase-pending {
+            background: #52526A;
+        }
+
+        .phase-failed {
+            background: #FF3333;
+        }
+
+        .phase-label {
+            color: #52526A;
+            font-size: 10px;
+            text-transform: uppercase;
+        }
+
+        .gate-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .gate-table th {
+            color: #9999CC;
+            font-weight: bold;
+            padding: 6px 8px;
+            text-align: left;
+            border-bottom: 1px solid #52526A;
+            font-size: 11px;
+        }
+
+        .gate-table td {
+            padding: 6px 8px;
+            border-bottom: 1px solid #52526A;
+            font-size: 12px;
+        }
+
+        .gate-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .gate-row-pass {
+            background: rgba(51, 255, 51, 0.05);
+        }
+
+        .gate-row-fail {
+            background: rgba(255, 51, 51, 0.05);
+        }
+
+        .gate-time {
+            color: #CCCCCC;
+        }
+
+        .gate-type {
+            color: #9999CC;
+        }
+
+        .gate-ac {
+            color: #F5F6FA;
+        }
+
+        .gate-exit-pass {
+            color: #33FF33;
+        }
+
+        .gate-exit-fail {
+            color: #FF3333;
+        }
+
+        .gate-class {
+            color: #CCCCCC;
+        }
+
+        .demo-content {
+            color: #F5F6FA;
+            line-height: 1.6;
+        }
+
+        .demo-heading {
+            color: #FF9966;
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .demo-text {
+            color: #CCCCCC;
+            margin-bottom: 12px;
+        }
+
+        .demo-badge-container {
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 1px solid #52526A;
+        }
+
+        .toolbar {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            padding: 10px 16px;
+            border: 1px solid #9999CC;
+            border-radius: 6px;
+            background: rgba(153, 153, 204, 0.05);
+        }
+
+        .toolbar-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .toolbar-key {
+            color: #FF9966;
+            font-weight: bold;
+        }
+
+        .toolbar-label {
+            color: #F5F6FA;
+        }
+
+        .scrollable {
+            max-height: 420px;
+            overflow-y: auto;
+        }
+
+        .scrollable::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .scrollable::-webkit-scrollbar-track {
+            background: #1B4F8F;
+            border-radius: 4px;
+        }
+
+        .scrollable::-webkit-scrollbar-thumb {
+            background: #9999CC;
+            border-radius: 4px;
+        }
+
+        .scrollable::-webkit-scrollbar-thumb:hover {
+            background: #CC99CC;
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal-window">
+        <div class="title-bar">
+            <div class="window-controls">
+                <div class="window-dot dot-close"></div>
+                <div class="window-dot dot-minimize"></div>
+                <div class="window-dot dot-maximize"></div>
+            </div>
+            <div class="window-title">ship-commander-3 — Mission Detail</div>
+        </div>
+
+        <div class="terminal-body">
+            <!-- Mission Header -->
+            <div class="mission-header">
+                <div class="header-row">
+                    <span class="mission-title">M-005: Implement User Authentication</span>
+                    <span class="badge badge-standard">STANDARD_OPS</span>
+                    <span class="badge badge-status">IN PROGRESS</span>
+                </div>
+                <div class="header-row">
+                    <span class="header-field">
+                        <span class="header-label">Wave:</span> <span class="header-value">Wave 2</span>
+                    </span>
+                    <span class="header-field">
+                        <span class="header-label">Rev:</span> <span class="header-value">1</span>
+                    </span>
+                    <span class="header-field">
+                        <span class="header-label">Agent:</span> <span class="header-value">Cmdr. Data</span>
+                    </span>
+                    <span class="header-field">
+                        <span class="header-label">Ship:</span> <span class="header-value">USS Enterprise</span>
+                    </span>
+                </div>
+            </div>
+
+            <!-- Content Area: AC Phase Detail + Gate Evidence + Demo Token -->
+            <div class="content-area">
+                <!-- AC Phase Detail Panel (40%) -->
+                <div class="panel panel-ac">
+                    <div class="panel-title">Acceptance Criteria & TDD Pipeline</div>
+                    <div class="scrollable">
+                        <!-- AC 1 - Complete -->
+                        <div class="ac-item">
+                            <div class="ac-header">
+                                <span class="ac-index">AC-1</span>
+                                <span class="ac-title">User can log in with email and password</span>
+                            </div>
+                            <div class="phase-pipeline">
+                                <span class="phase-dot phase-complete" title="RED: Complete"></span>
+                                <span class="phase-dot phase-complete" title="VERIFY_RED: Complete"></span>
+                                <span class="phase-dot phase-complete" title="GREEN: Complete"></span>
+                                <span class="phase-dot phase-complete" title="VERIFY_GREEN: Complete"></span>
+                                <span class="phase-dot phase-complete" title="REFACTOR: Complete"></span>
+                                <span class="phase-dot phase-complete" title="VERIFY_REFACTOR: Complete"></span>
+                            </div>
+                        </div>
+
+                        <!-- AC 2 - Complete -->
+                        <div class="ac-item">
+                            <div class="ac-header">
+                                <span class="ac-index">AC-2</span>
+                                <span class="ac-title">Invalid credentials show error message</span>
+                            </div>
+                            <div class="phase-pipeline">
+                                <span class="phase-dot phase-complete" title="RED: Complete"></span>
+                                <span class="phase-dot phase-complete" title="VERIFY_RED: Complete"></span>
+                                <span class="phase-dot phase-complete" title="GREEN: Complete"></span>
+                                <span class="phase-dot phase-complete" title="VERIFY_GREEN: Complete"></span>
+                                <span class="phase-dot phase-complete" title="REFACTOR: Complete"></span>
+                                <span class="phase-dot phase-complete" title="VERIFY_REFACTOR: Complete"></span>
+                            </div>
+                        </div>
+
+                        <!-- AC 3 - In Progress at REFACTOR -->
+                        <div class="ac-item">
+                            <div class="ac-header">
+                                <span class="ac-index">AC-3</span>
+                                <span class="ac-title">Session token is stored securely</span>
+                            </div>
+                            <div class="phase-pipeline">
+                                <span class="phase-dot phase-complete" title="RED: Complete"></span>
+                                <span class="phase-dot phase-complete" title="VERIFY_RED: Complete"></span>
+                                <span class="phase-dot phase-complete" title="GREEN: Complete"></span>
+                                <span class="phase-dot phase-complete" title="VERIFY_GREEN: Complete"></span>
+                                <span class="phase-dot phase-active" title="REFACTOR: Active"></span>
+                                <span class="phase-dot phase-pending" title="VERIFY_REFACTOR: Pending"></span>
+                            </div>
+                        </div>
+
+                        <!-- AC 4 - Pending -->
+                        <div class="ac-item">
+                            <div class="ac-header">
+                                <span class="ac-index">AC-4</span>
+                                <span class="ac-title">User can log out and clear session</span>
+                            </div>
+                            <div class="phase-pipeline">
+                                <span class="phase-dot phase-pending" title="RED: Pending"></span>
+                                <span class="phase-dot phase-pending" title="VERIFY_RED: Pending"></span>
+                                <span class="phase-dot phase-pending" title="GREEN: Pending"></span>
+                                <span class="phase-dot phase-pending" title="VERIFY_GREEN: Pending"></span>
+                                <span class="phase-dot phase-pending" title="REFACTOR: Pending"></span>
+                                <span class="phase-dot phase-pending" title="VERIFY_REFACTOR: Pending"></span>
+                            </div>
+                        </div>
+
+                        <!-- AC 5 - Pending -->
+                        <div class="ac-item">
+                            <div class="ac-header">
+                                <span class="ac-index">AC-5</span>
+                                <span class="ac-title">Password must meet complexity requirements</span>
+                            </div>
+                            <div class="phase-pipeline">
+                                <span class="phase-dot phase-pending" title="RED: Pending"></span>
+                                <span class="phase-dot phase-pending" title="VERIFY_RED: Pending"></span>
+                                <span class="phase-dot phase-pending" title="GREEN: Pending"></span>
+                                <span class="phase-dot phase-pending" title="VERIFY_GREEN: Pending"></span>
+                                <span class="phase-dot phase-pending" title="REFACTOR: Pending"></span>
+                                <span class="phase-dot phase-pending" title="VERIFY_REFACTOR: Pending"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Gate Evidence Panel (30%) -->
+                <div class="panel panel-gate">
+                    <div class="panel-title">Gate Evidence</div>
+                    <div class="scrollable">
+                        <table class="gate-table">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Gate</th>
+                                    <th>AC</th>
+                                    <th>Exit</th>
+                                    <th>Class</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr class="gate-row-pass">
+                                    <td class="gate-time">14:23</td>
+                                    <td class="gate-type">V_GREEN</td>
+                                    <td class="gate-ac">AC-3</td>
+                                    <td class="gate-exit-pass">✓</td>
+                                    <td class="gate-class">STANDARD</td>
+                                </tr>
+                                <tr class="gate-row-pass">
+                                    <td class="gate-time">14:19</td>
+                                    <td class="gate-type">GREEN</td>
+                                    <td class="gate-ac">AC-3</td>
+                                    <td class="gate-exit-pass">✓</td>
+                                    <td class="gate-class">STANDARD</td>
+                                </tr>
+                                <tr class="gate-row-pass">
+                                    <td class="gate-time">14:15</td>
+                                    <td class="gate-type">V_RED</td>
+                                    <td class="gate-ac">AC-3</td>
+                                    <td class="gate-exit-pass">✓</td>
+                                    <td class="gate-class">STANDARD</td>
+                                </tr>
+                                <tr class="gate-row-fail">
+                                    <td class="gate-time">14:11</td>
+                                    <td class="gate-type">RED</td>
+                                    <td class="gate-ac">AC-3</td>
+                                    <td class="gate-exit-fail">✗</td>
+                                    <td class="gate-class">STANDARD</td>
+                                </tr>
+                                <tr class="gate-row-pass">
+                                    <td class="gate-time">14:08</td>
+                                    <td class="gate-type">V_REFACT</td>
+                                    <td class="gate-ac">AC-2</td>
+                                    <td class="gate-exit-pass">✓</td>
+                                    <td class="gate-class">STANDARD</td>
+                                </tr>
+                                <tr class="gate-row-pass">
+                                    <td class="gate-time">14:04</td>
+                                    <td class="gate-type">REFACTOR</td>
+                                    <td class="gate-ac">AC-2</td>
+                                    <td class="gate-exit-pass">✓</td>
+                                    <td class="gate-class">STANDARD</td>
+                                </tr>
+                                <tr class="gate-row-pass">
+                                    <td class="gate-time">13:58</td>
+                                    <td class="gate-type">V_GREEN</td>
+                                    <td class="gate-ac">AC-2</td>
+                                    <td class="gate-exit-pass">✓</td>
+                                    <td class="gate-class">STANDARD</td>
+                                </tr>
+                                <tr class="gate-row-pass">
+                                    <td class="gate-time">13:54</td>
+                                    <td class="gate-type">GREEN</td>
+                                    <td class="gate-ac">AC-2</td>
+                                    <td class="gate-exit-pass">✓</td>
+                                    <td class="gate-class">STANDARD</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Demo Token Preview Panel (30%) -->
+                <div class="panel panel-demo">
+                    <div class="panel-title">Demo Token Preview</div>
+                    <div class="scrollable">
+                        <div class="demo-content">
+                            <div class="demo-heading">## Auth Module</div>
+                            <div class="demo-text">
+                                Users can now log in with email and password credentials.
+                                The system validates input, manages secure sessions, and
+                                provides appropriate error feedback for invalid attempts.
+                            </div>
+                            <div class="demo-text">
+                                Session tokens are stored using industry-standard encryption
+                                and automatically expire after 24 hours of inactivity.
+                            </div>
+                            <div class="demo-text">
+                                Password complexity requirements enforce:<br>
+                                • Minimum 8 characters<br>
+                                • At least one uppercase letter<br>
+                                • At least one number<br>
+                                • At least one special character
+                            </div>
+                            <div class="demo-badge-container">
+                                <span class="badge badge-valid">✓ VALID</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Navigable Toolbar -->
+            <div class="toolbar">
+                <div class="toolbar-item">
+                    <span class="toolbar-key">[h]</span>
+                    <span class="toolbar-label">Halt</span>
+                </div>
+                <div class="toolbar-item">
+                    <span class="toolbar-key">[?]</span>
+                    <span class="toolbar-label">Help</span>
+                </div>
+                <div class="toolbar-item">
+                    <span class="toolbar-key">[Esc]</span>
+                    <span class="toolbar-label">Bridge</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

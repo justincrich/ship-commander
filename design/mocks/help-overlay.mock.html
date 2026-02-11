@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Help Overlay - Ship Commander 3 TUI</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #1a1a2e;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .terminal-window {
+            max-width: 1100px;
+            width: 100%;
+            border-radius: 8px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+        }
+
+        .title-bar {
+            background: #2D2D2D;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .window-controls {
+            display: flex;
+            gap: 8px;
+            margin-right: 16px;
+        }
+
+        .window-control {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .control-close { background: #FF5F56; }
+        .control-minimize { background: #FFBD2E; }
+        .control-maximize { background: #27C93F; }
+
+        .window-title {
+            color: #CCCCCC;
+            font-size: 13px;
+            flex: 1;
+            text-align: center;
+            margin-right: 60px;
+        }
+
+        .terminal-body {
+            background: #000000;
+            color: #F5F6FA;
+            font-size: 13px;
+            line-height: 1.4;
+            padding: 20px;
+            min-height: 600px;
+            position: relative;
+            border-radius: 0 0 8px 8px;
+        }
+
+        /* Dimmed background content */
+        .background-content {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            opacity: 0.15;
+            padding: 20px;
+            pointer-events: none;
+        }
+
+        .bg-header {
+            color: #FF9966;
+            font-weight: bold;
+            margin-bottom: 16px;
+        }
+
+        .bg-section {
+            margin-bottom: 12px;
+            color: #F5F6FA;
+        }
+
+        .bg-label {
+            color: #9999CC;
+        }
+
+        /* Help overlay */
+        .help-overlay {
+            position: relative;
+            z-index: 10;
+            width: 70%;
+            margin: 60px auto;
+            background: rgba(0, 0, 0, 0.92);
+            border: 2px solid #99CCFF;
+            border-style: double;
+            padding: 20px 24px;
+        }
+
+        .overlay-title {
+            text-align: center;
+            margin-bottom: 4px;
+        }
+
+        .title-text {
+            color: #FF9966;
+            font-weight: bold;
+            font-size: 14px;
+            letter-spacing: 0.5px;
+        }
+
+        .context-text {
+            text-align: center;
+            color: #CCCCCC;
+            opacity: 0.6;
+            font-size: 12px;
+            margin-bottom: 24px;
+        }
+
+        .section {
+            margin-bottom: 20px;
+        }
+
+        .section-header {
+            color: #99CCFF;
+            font-weight: bold;
+            margin-bottom: 8px;
+            font-size: 13px;
+            letter-spacing: 0.3px;
+        }
+
+        .keybinding-row {
+            display: flex;
+            margin-bottom: 4px;
+            padding-left: 12px;
+        }
+
+        .key {
+            color: #FF9966;
+            font-weight: bold;
+            min-width: 180px;
+            flex-shrink: 0;
+        }
+
+        .description {
+            color: #F5F6FA;
+            flex: 1;
+        }
+
+        .dismiss-hint {
+            text-align: center;
+            color: #CCCCCC;
+            opacity: 0.5;
+            margin-top: 24px;
+            font-size: 12px;
+        }
+
+        /* Border characters */
+        .border-top {
+            color: #99CCFF;
+            text-align: center;
+            margin-bottom: 12px;
+        }
+
+        .border-bottom {
+            color: #99CCFF;
+            text-align: center;
+            margin-top: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal-window">
+        <div class="title-bar">
+            <div class="window-controls">
+                <div class="window-control control-close"></div>
+                <div class="window-control control-minimize"></div>
+                <div class="window-control control-maximize"></div>
+            </div>
+            <div class="window-title">sc3 tui</div>
+        </div>
+
+        <div class="terminal-body">
+            <!-- Dimmed background content (Ship Bridge) -->
+            <div class="background-content">
+                <div class="bg-header">╔════════════════════════════════════════════════════════════════════════════════╗</div>
+                <div class="bg-header">║                              SHIP BRIDGE - USS ENDEAVOR                        ║</div>
+                <div class="bg-header">╚════════════════════════════════════════════════════════════════════════════════╝</div>
+                <div class="bg-section" style="margin-top: 20px;">
+                    <div class="bg-label">STATUS:</div>
+                    <div>Active Mission: Deploy Authentication System</div>
+                    <div>Current Agent: backend-engineer</div>
+                    <div>Progress: 67%</div>
+                </div>
+                <div class="bg-section" style="margin-top: 20px;">
+                    <div class="bg-label">RECENT ACTIVITY:</div>
+                    <div>✓ Database schema created</div>
+                    <div>✓ User model implemented</div>
+                    <div>→ Working on JWT integration...</div>
+                </div>
+                <div class="bg-section" style="margin-top: 20px;">
+                    <div class="bg-label">CONTROLS:</div>
+                    <div>[p] Ready Room  [l] Launch  [a] Agent Detail  [h] Halt  [?] Help</div>
+                </div>
+            </div>
+
+            <!-- Help overlay -->
+            <div class="help-overlay">
+                <div class="border-top">╔══════════════════════════════════════════════════════════════════╗</div>
+
+                <div class="overlay-title">
+                    <div class="title-text">KEYBOARD SHORTCUTS</div>
+                </div>
+                <div class="context-text">Context: Ship Bridge</div>
+
+                <!-- GLOBAL Section -->
+                <div class="section">
+                    <div class="section-header">GLOBAL</div>
+                    <div class="keybinding-row">
+                        <div class="key">Tab / Shift+Tab</div>
+                        <div class="description">Cycle panel focus</div>
+                    </div>
+                    <div class="keybinding-row">
+                        <div class="key">?</div>
+                        <div class="description">Toggle this help</div>
+                    </div>
+                    <div class="keybinding-row">
+                        <div class="key">q</div>
+                        <div class="description">Quit</div>
+                    </div>
+                    <div class="keybinding-row">
+                        <div class="key">Ctrl+C</div>
+                        <div class="description">Force quit</div>
+                    </div>
+                </div>
+
+                <!-- NAVIGATION Section -->
+                <div class="section">
+                    <div class="section-header">NAVIGATION</div>
+                    <div class="keybinding-row">
+                        <div class="key">Enter</div>
+                        <div class="description">Drill down / Select</div>
+                    </div>
+                    <div class="keybinding-row">
+                        <div class="key">Escape</div>
+                        <div class="description">Go back / Cancel</div>
+                    </div>
+                    <div class="keybinding-row">
+                        <div class="key">Up/Down</div>
+                        <div class="description">Navigate list items</div>
+                    </div>
+                    <div class="keybinding-row">
+                        <div class="key">Page Up/Down</div>
+                        <div class="description">Scroll viewport</div>
+                    </div>
+                </div>
+
+                <!-- SHIP BRIDGE Section -->
+                <div class="section">
+                    <div class="section-header">SHIP BRIDGE</div>
+                    <div class="keybinding-row">
+                        <div class="key">p</div>
+                        <div class="description">Open Ready Room (plan)</div>
+                    </div>
+                    <div class="keybinding-row">
+                        <div class="key">l</div>
+                        <div class="description">Launch ship</div>
+                    </div>
+                    <div class="keybinding-row">
+                        <div class="key">a</div>
+                        <div class="description">Agent detail</div>
+                    </div>
+                    <div class="keybinding-row">
+                        <div class="key">h</div>
+                        <div class="description">Halt mission/agent</div>
+                    </div>
+                    <div class="keybinding-row">
+                        <div class="key">r</div>
+                        <div class="description">Retry mission</div>
+                    </div>
+                    <div class="keybinding-row">
+                        <div class="key">w</div>
+                        <div class="description">Wave manager</div>
+                    </div>
+                    <div class="keybinding-row">
+                        <div class="key">Space</div>
+                        <div class="description">Pause/resume</div>
+                    </div>
+                </div>
+
+                <div class="border-bottom">╚══════════════════════════════════════════════════════════════════╝</div>
+
+                <div class="dismiss-hint">Press ? or Escape to close</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

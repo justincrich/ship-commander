@@ -1,0 +1,76 @@
+{
+  "design_key": "agent-detail",
+  "name": "Agent Detail",
+  "version": "2.0",
+  "description": "Full-screen drill-down for a single agent. Shows agent info, real-time output viewport, error context, and action controls (halt/retry/ignore).",
+  "screen": {
+    "type": "drill-down",
+    "parent": "ship-bridge",
+    "children": [],
+    "mode_availability": { "basic": true, "advanced": true, "executive": true },
+    "mode_differences": {
+      "basic": ["Output viewport shows last 20 lines only", "Error context includes plain-language explanation", "Action confirmation dialogs include explanatory text"],
+      "advanced": ["Output viewport shows full capture (scrollable)", "Error context shows raw gate output"],
+      "executive": ["Same as basic but with less output context"]
+    }
+  },
+  "layout": {
+    "structure": "AgentProfileHeader | OutputViewport (70%) | ErrorContext (15%, conditional) | NavigableToolbar",
+    "rows": [
+      { "name": "agent-profile", "height": 4, "panels": [
+        { "id": "agent-profile-header", "width": "100%", "description": "Agent name (bold butterscotch), role badge (Captain=gold, Commander=blue, Ensign=butterscotch), ship assignment, harness + model, current mission ID, TDD phase indicator, elapsed timer, status badge. Skills summary. Mission prompt first line (faint)." }
+      ]},
+      { "name": "output", "height": "70%", "panels": [
+        { "id": "output-viewport", "width": "100%", "description": "Scrollable viewport of recent agent output from tmux. Real-time append. Auto-scroll with manual override. Syntax highlighting where possible. Line numbers in dim." }
+      ]},
+      { "name": "error-context", "height": "15%", "condition": "agent.status == 'stuck' || agent.status == 'dead'", "panels": [
+        { "id": "error-context-panel", "width": "100%", "description": "Red_alert border panel: last gate failure, stuck detection timestamp, timeout info, last meaningful output line." }
+      ]},
+      { "name": "toolbar", "height": 1, "panels": [
+        { "id": "navigable-toolbar", "width": "100%", "description": "NavigableToolbar: [h] Halt  [r] Retry  [i] Ignore Stuck  [?] Help  [Esc] Back. Each button selectable via shortcut key OR arrow + Enter." }
+      ]}
+    ],
+    "responsive": {
+      "standard": { "min_width": 80, "description": "Full layout with profile, output, and error sections" },
+      "compact": { "threshold": "<80 cols", "description": "Profile compresses to 2 lines. Error context behind toggle." }
+    }
+  },
+  "components": [
+    { "name": "AgentProfileHeader", "charm_base": "lipgloss.JoinHorizontal + lipgloss.NewStyle()", "tokens_used": ["butterscotch", "gold", "blue", "purple", "space_white", "light_gray", "green_ok", "red_alert"], "variants": ["running", "done", "stuck", "dead", "idle"] },
+    { "name": "OutputViewport", "charm_base": "bubbles.viewport", "tokens_used": ["butterscotch", "galaxy_gray", "space_white", "light_gray"], "variants": ["live", "frozen"] },
+    { "name": "ErrorContextPanel", "charm_base": "lipgloss.NewStyle().Border(lipgloss.ThickBorder())", "tokens_used": ["red_alert", "yellow_caution", "space_white", "light_gray"], "variants": ["stuck", "dead"] },
+    { "name": "PhaseIndicator", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["butterscotch", "green_ok", "galaxy_gray", "space_white"], "variants": ["full", "compact"] },
+    { "name": "StatusBadge", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["butterscotch", "green_ok", "blue", "galaxy_gray", "red_alert", "yellow_caution"], "variants": ["running", "done", "stuck", "dead", "idle"] },
+    { "name": "ElapsedTimer", "charm_base": "bubbles.stopwatch", "tokens_used": ["light_gray", "yellow_caution", "galaxy_gray"], "variants": ["normal", "warning", "stopped"] },
+    { "name": "NavigableToolbar", "charm_base": "lipgloss.JoinHorizontal + bubbles.key", "tokens_used": ["butterscotch", "moonlit_violet", "galaxy_gray", "space_white"], "variants": ["default", "navigating"] }
+  ],
+  "data_sources": [
+    { "source": "agent_instance", "description": "Full agent state including role, harness, model, mission" },
+    { "source": "agent_output", "description": "Real-time output from tmux capture-pane" },
+    { "source": "gate_evidence", "description": "Gate results for agent's current mission" },
+    { "source": "doctor_alerts", "description": "Stuck detection events for this agent" }
+  ],
+  "keyboard": {
+    "global": { "Tab": "Cycle focus: output-viewport -> error-context -> navigable-toolbar", "?": "Help", "q": "Quit" },
+    "view_specific": { "Up/Down": "Scroll output", "PageUp/PageDown": "Page scroll output", "h": "Halt agent (with confirmation)", "r": "Retry mission (with confirmation)", "i": "Ignore stuck warning", "Enter": "Activate highlighted toolbar button", "Escape": "Return to previous view" },
+    "toolbar_buttons": [
+      { "key": "h", "label": "Halt", "action": "Halt agent" },
+      { "key": "r", "label": "Retry", "action": "Retry mission" },
+      { "key": "i", "label": "Ignore", "action": "Ignore stuck warning" },
+      { "key": "?", "label": "Help", "action": "Help overlay" },
+      { "key": "Esc", "label": "Back", "action": "Return to previous view" }
+    ]
+  },
+  "transitions": [
+    { "to": "ship-bridge", "trigger": "Escape", "type": "pop", "animation": { "preset": "view_switch", "direction": "slide-left" } }
+  ],
+  "special_behavior": [
+    { "trigger": "Agent becomes stuck", "behavior": "Error context panel appears with yellow_caution border. Agent card pulses yellow. Toolbar shows [i] Ignore option." },
+    { "trigger": "Agent dies", "behavior": "Error context panel appears with red_alert border. Output viewport frozen. Toolbar shows [r] Retry option." }
+  ],
+  "tokens": {
+    "colors": { "primary": "butterscotch", "accent": "blue" },
+    "borders": { "default": "lipgloss.RoundedBorder() in blue", "focused": "lipgloss.RoundedBorder() in moonlit_violet", "error": "lipgloss.ThickBorder() in red_alert" },
+    "icons": { "running": "\u25B8", "done": "\u2713", "stuck": "\u26A0", "dead": "\u2717", "idle": "\u23F8" }
+  }
+}

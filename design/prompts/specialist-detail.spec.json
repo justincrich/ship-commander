@@ -1,0 +1,68 @@
+{
+  "design_key": "specialist-detail",
+  "name": "Specialist Detail",
+  "version": "2.0",
+  "description": "Full-screen drill-down into a single specialist agent session during planning. Shows full output viewport, sign-off status, and message history.",
+  "screen": {
+    "type": "drill-down",
+    "parent": "ready-room",
+    "children": [],
+    "mode_availability": { "basic": true, "advanced": true, "executive": false },
+    "mode_differences": {
+      "basic": ["Output viewport shows last 20 lines only", "Plain-language explanation of specialist work"],
+      "advanced": ["Output viewport shows full capture (scrollable)", "Raw specialist output visible"]
+    }
+  },
+  "layout": {
+    "structure": "AgentProfileHeader | OutputViewport (70%) | SignoffStatus (15%) | NavigableToolbar",
+    "rows": [
+      { "name": "agent-profile", "height": 4, "panels": [
+        { "id": "agent-profile-header", "width": "100%", "description": "Specialist name (bold butterscotch), role badge (Captain=gold, Commander=blue, Design=purple), harness + model, elapsed timer, status badge. Planning context: directive title, iteration number." }
+      ]},
+      { "name": "output", "height": "70%", "panels": [
+        { "id": "output-viewport", "width": "100%", "description": "Scrollable viewport of specialist's planning output. Real-time append for active sessions. Shows analysis, mission proposals, questions. Auto-scroll with manual override." }
+      ]},
+      { "name": "signoff-status", "height": "15%", "panels": [
+        { "id": "signoff-panel", "width": "100%", "description": "Sign-off tracker for this specialist. Shows which missions they've reviewed, approval status, and any outstanding concerns. Compact list with status icons." }
+      ]},
+      { "name": "toolbar", "height": 1, "panels": [
+        { "id": "navigable-toolbar", "width": "100%", "description": "NavigableToolbar: [?] Help  [Esc] Ready Room. Minimal actions -- this is a read-only monitoring view." }
+      ]}
+    ],
+    "responsive": {
+      "standard": { "min_width": 80, "description": "Full layout with profile, output, and signoff sections" },
+      "compact": { "threshold": "<80 cols", "description": "Profile compresses to 2 lines. Signoff behind toggle." }
+    }
+  },
+  "components": [
+    { "name": "AgentProfileHeader", "charm_base": "lipgloss.JoinHorizontal + lipgloss.NewStyle()", "tokens_used": ["butterscotch", "gold", "blue", "purple", "space_white", "light_gray"], "variants": ["captain", "commander", "design_officer"] },
+    { "name": "OutputViewport", "charm_base": "bubbles.viewport", "tokens_used": ["butterscotch", "galaxy_gray", "space_white", "light_gray"], "variants": ["live", "frozen"] },
+    { "name": "SignoffTracker", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["green_ok", "butterscotch", "blue", "galaxy_gray", "space_white"], "variants": ["default", "compact"] },
+    { "name": "StatusBadge", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["butterscotch", "green_ok", "blue", "galaxy_gray", "red_alert"], "variants": ["working", "done", "waiting", "failed"] },
+    { "name": "ElapsedTimer", "charm_base": "bubbles.stopwatch", "tokens_used": ["light_gray", "yellow_caution", "galaxy_gray"], "variants": ["normal", "warning", "stopped"] },
+    { "name": "NavigableToolbar", "charm_base": "lipgloss.JoinHorizontal + bubbles.key", "tokens_used": ["butterscotch", "moonlit_violet", "galaxy_gray", "space_white"], "variants": ["default", "navigating"] }
+  ],
+  "data_sources": [
+    { "source": "agent_instance", "description": "Full specialist agent state including role, harness, model" },
+    { "source": "agent_output", "description": "Real-time planning output from the specialist session" },
+    { "source": "signoff_status", "description": "Per-mission sign-off state for this specialist" },
+    { "source": "planning_iteration", "description": "Current iteration context" }
+  ],
+  "keyboard": {
+    "global": { "Tab": "Cycle focus: output-viewport -> signoff-panel -> navigable-toolbar", "?": "Help", "q": "Quit" },
+    "view_specific": { "Up/Down": "Scroll output", "PageUp/PageDown": "Page scroll output", "Escape": "Return to Ready Room" },
+    "toolbar_buttons": [
+      { "key": "?", "label": "Help", "action": "Help overlay" },
+      { "key": "Esc", "label": "Ready Room", "action": "Return to Ready Room" }
+    ]
+  },
+  "transitions": [
+    { "to": "ready-room", "trigger": "Escape", "type": "pop", "animation": { "preset": "view_switch", "direction": "slide-left" } }
+  ],
+  "special_behavior": [],
+  "tokens": {
+    "colors": { "primary": "butterscotch", "accent": "purple" },
+    "borders": { "default": "lipgloss.RoundedBorder() in blue", "focused": "lipgloss.RoundedBorder() in moonlit_violet" },
+    "icons": { "working": "\u25CF", "done": "\u2713", "waiting": "\u23F8", "failed": "\u2717" }
+  }
+}

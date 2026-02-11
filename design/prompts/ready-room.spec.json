@@ -1,0 +1,83 @@
+{
+  "design_key": "ready-room",
+  "name": "Ready Room",
+  "version": "2.0",
+  "description": "Captain's Ready Room for directive planning. Shows crew planning sessions and directive content. Coverage and dependency analysis moved to Plan Review.",
+  "screen": {
+    "type": "drill-down",
+    "parent": "ship-bridge",
+    "children": ["specialist-detail", "plan-review"],
+    "mode_availability": { "basic": true, "advanced": true, "executive": false },
+    "mode_differences": {
+      "basic": ["Directive sidebar starts hidden (toggle with [t])", "Specialist output truncated to status line only", "Inline hints enabled"],
+      "advanced": ["Directive sidebar visible by default", "Specialist output shows last 3-5 lines"]
+    }
+  },
+  "layout": {
+    "structure": "ReadyRoomHeader | DirectiveSidebar (30%) + CrewSessionGrid (70%) | NavigableToolbar",
+    "rows": [
+      { "name": "header", "height": 2, "panels": [
+        { "id": "ready-room-header", "width": "100%", "description": "'READY ROOM -- <Ship Name>' in bold purple. Directive title (blue). Planning iteration (e.g., 'Iteration 2/5'). Pending question count. Crew complement summary." }
+      ]},
+      { "name": "planning-content", "height": "fill", "panels": [
+        { "id": "directive-sidebar", "width": "30%", "description": "Directive (PRD) content rendered via Glamour markdown. Scrollable viewport. Shows title, description, use cases, acceptance criteria, scope boundaries. Togglable in compact mode with [t]." },
+        { "id": "crew-session-grid", "width": "70%", "description": "Grid of crew member session panels. Each panel shows agent name, role, status indicator (working/done/waiting/failed), harness + model, elapsed timer, output summary. 2-3 columns depending on crew size. Active sessions have butterscotch border, done sessions green_ok." }
+      ]},
+      { "name": "toolbar", "height": 1, "panels": [
+        { "id": "navigable-toolbar", "width": "100%", "description": "NavigableToolbar: [a] Approve  [f] Feedback  [s] Shelve  [v] Review Plan  [t] Toggle Directive  [?] Help  [Esc] Bridge. Each button selectable via shortcut key OR arrow + Enter." }
+      ]}
+    ],
+    "responsive": {
+      "standard": { "min_width": 120, "description": "Full layout: directive sidebar + crew grid side-by-side" },
+      "compact": { "threshold": "<120 cols", "description": "Directive sidebar collapses to togglable panel. Crew sessions stack vertically." }
+    }
+  },
+  "components": [
+    { "name": "ReadyRoomHeader", "charm_base": "lipgloss.JoinHorizontal + lipgloss.NewStyle()", "tokens_used": ["purple", "blue", "butterscotch", "space_white", "pink"], "variants": [] },
+    { "name": "Viewport", "charm_base": "bubbles.viewport + glamour.Render", "tokens_used": ["space_white", "light_gray", "blue"], "variants": ["scrollable"] },
+    { "name": "SpecialistCard", "charm_base": "lipgloss.NewStyle().Border(lipgloss.RoundedBorder())", "tokens_used": ["butterscotch", "green_ok", "blue", "galaxy_gray", "red_alert", "space_white", "light_gray", "purple"], "variants": ["working", "done", "waiting", "skipped", "failed"] },
+    { "name": "SpecialistGrid", "charm_base": "lipgloss.JoinHorizontal", "tokens_used": ["butterscotch", "blue", "space_white"], "variants": ["horizontal", "stacked"] },
+    { "name": "PlanningIterationBadge", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["blue", "yellow_caution", "red_alert", "space_white"], "variants": ["normal", "approaching", "final"] },
+    { "name": "SignoffTracker", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["green_ok", "butterscotch", "blue", "galaxy_gray", "space_white"], "variants": ["default", "compact"] },
+    { "name": "NavigableToolbar", "charm_base": "lipgloss.JoinHorizontal + bubbles.key", "tokens_used": ["butterscotch", "moonlit_violet", "galaxy_gray", "space_white"], "variants": ["default", "navigating"] },
+    { "name": "StatusBadge", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["butterscotch", "green_ok", "blue", "galaxy_gray", "red_alert", "yellow_caution"], "variants": ["working", "done", "waiting", "failed"] },
+    { "name": "ElapsedTimer", "charm_base": "bubbles.stopwatch", "tokens_used": ["light_gray", "yellow_caution", "galaxy_gray"], "variants": ["normal", "warning", "stopped"] },
+    { "name": "Spinner", "charm_base": "bubbles.spinner", "tokens_used": ["purple"], "variants": ["planning"] }
+  ],
+  "data_sources": [
+    { "source": "ship_state", "description": "Ship ID, name, directive" },
+    { "source": "directive_content", "description": "Full directive PRD content for Glamour rendering" },
+    { "source": "crew_sessions", "description": "Planning agent sessions (Captain, Commander, specialists)" },
+    { "source": "planning_messages", "description": "ReadyRoomMessage stream between sessions" },
+    { "source": "mission_manifest", "description": "Current draft mission list with coverage and dependencies" },
+    { "source": "planning_iteration", "description": "Current iteration count, consensus status" },
+    { "source": "pending_questions", "description": "Queue of ADMIRAL_QUESTION events" }
+  ],
+  "keyboard": {
+    "global": { "Tab": "Cycle focus: directive-sidebar -> crew-sessions -> navigable-toolbar", "Shift+Tab": "Reverse focus cycle", "?": "Help", "q": "Quit" },
+    "view_specific": { "Enter": "Drill into crew member for full output", "Escape": "Return to Ship Bridge", "a": "Approve plan (when consensus reached)", "f": "Provide feedback (reconvene planning)", "s": "Shelve plan (save for later)", "v": "Open Plan Review view", "t": "Toggle directive sidebar (compact mode)" },
+    "toolbar_buttons": [
+      { "key": "a", "label": "Approve", "action": "Approve plan" },
+      { "key": "f", "label": "Feedback", "action": "Provide feedback" },
+      { "key": "s", "label": "Shelve", "action": "Shelve plan" },
+      { "key": "v", "label": "Review", "action": "Open Plan Review" },
+      { "key": "t", "label": "Toggle", "action": "Toggle directive sidebar" },
+      { "key": "?", "label": "Help", "action": "Help overlay" },
+      { "key": "Esc", "label": "Bridge", "action": "Return to Ship Bridge" }
+    ]
+  },
+  "transitions": [
+    { "to": "ship-bridge", "trigger": "Escape", "type": "pop", "animation": { "preset": "view_switch", "direction": "slide-left" } },
+    { "to": "specialist-detail", "trigger": "Enter on specialist panel", "type": "push", "animation": { "preset": "view_switch", "direction": "slide-right" } },
+    { "to": "plan-review", "trigger": "Press 'v' or automatic when consensus reached", "type": "push", "animation": { "preset": "view_switch", "direction": "slide-right" } }
+  ],
+  "special_behavior": [
+    { "trigger": "Pending ADMIRAL_QUESTION", "behavior": "Admiral question modal overlays. Identifies asking crew member by name and role. Planning suspends until answered." },
+    { "trigger": "Consensus reached", "behavior": "Plan review view opens automatically. All sign-offs complete. Toolbar highlights [v] Review Plan." }
+  ],
+  "tokens": {
+    "colors": { "primary": "purple", "accent": "butterscotch" },
+    "borders": { "default": "lipgloss.RoundedBorder() in blue", "focused": "lipgloss.RoundedBorder() in moonlit_violet" },
+    "icons": { "working": "\u25CF", "done": "\u2713", "waiting": "\u23F8", "skipped": "\u2298", "failed": "\u2717" }
+  }
+}

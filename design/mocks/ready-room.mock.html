@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ready Room - Ship Commander 3</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #1a1a2e;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.4;
+            color: #F5F6FA;
+            padding: 40px 20px;
+            overflow-x: hidden;
+        }
+
+        .terminal-frame {
+            max-width: 1100px;
+            margin: 0 auto;
+            border-radius: 8px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+        }
+
+        .terminal-titlebar {
+            background: #2D2D2D;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .terminal-dots {
+            display: flex;
+            gap: 8px;
+        }
+
+        .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .dot.red { background: #FF5F56; }
+        .dot.yellow { background: #FFBD2E; }
+        .dot.green { background: #27C93F; }
+
+        .terminal-title {
+            flex: 1;
+            text-align: center;
+            color: #C4C4C4;
+            font-size: 12px;
+            margin-left: -60px;
+        }
+
+        .terminal-body {
+            background: #000000;
+            padding: 20px;
+            min-height: 600px;
+            border-radius: 0 0 8px 8px;
+        }
+
+        .header {
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #52526A;
+        }
+
+        .header-title {
+            color: #CC99CC;
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 6px;
+        }
+
+        .header-directive {
+            color: #9999CC;
+            margin-bottom: 4px;
+        }
+
+        .header-meta {
+            color: #CCCCCC;
+            font-size: 12px;
+            display: flex;
+            gap: 20px;
+        }
+
+        .meta-item {
+            display: inline-block;
+        }
+
+        .planning-content {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 16px;
+            min-height: 460px;
+        }
+
+        .directive-sidebar {
+            width: 30%;
+            border: 1px solid #9999CC;
+            border-radius: 8px;
+            padding: 12px;
+            overflow-y: auto;
+            max-height: 480px;
+        }
+
+        .directive-sidebar h3 {
+            color: #FF9966;
+            font-size: 13px;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        .directive-sidebar h4 {
+            color: #9999CC;
+            font-size: 12px;
+            margin-top: 12px;
+            margin-bottom: 6px;
+            font-weight: bold;
+        }
+
+        .directive-sidebar p {
+            color: #CCCCCC;
+            margin-bottom: 8px;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .directive-sidebar ul {
+            list-style: none;
+            margin-bottom: 12px;
+        }
+
+        .directive-sidebar li {
+            padding-left: 16px;
+            margin-bottom: 4px;
+            color: #CCCCCC;
+            font-size: 12px;
+        }
+
+        .coverage-status {
+            display: inline-block;
+            margin-right: 8px;
+            font-weight: bold;
+        }
+
+        .coverage-status.covered { color: #33FF33; }
+        .coverage-status.partial { color: #FFCC00; }
+        .coverage-status.uncovered { color: #FF3333; }
+
+        .crew-session-grid {
+            width: 70%;
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            grid-template-rows: repeat(2, 1fr);
+            gap: 12px;
+        }
+
+        .specialist-card {
+            border: 2px solid #52526A;
+            border-radius: 8px;
+            padding: 12px;
+            background: #0a0a0a;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .specialist-card.working {
+            border-color: #FF9966;
+        }
+
+        .specialist-card.done {
+            border-color: #33FF33;
+        }
+
+        .specialist-card.waiting {
+            border-color: #52526A;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 8px;
+        }
+
+        .specialist-name {
+            color: #9999CC;
+            font-weight: bold;
+            font-size: 13px;
+        }
+
+        .status-badge {
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-weight: bold;
+        }
+
+        .status-badge.working {
+            background: #FF9966;
+            color: #000000;
+        }
+
+        .status-badge.done {
+            background: #33FF33;
+            color: #000000;
+        }
+
+        .status-badge.waiting {
+            background: #52526A;
+            color: #F5F6FA;
+        }
+
+        .role-badge {
+            color: #CC99CC;
+            font-size: 11px;
+            margin-bottom: 6px;
+        }
+
+        .session-meta {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 8px;
+            font-size: 11px;
+            color: #CCCCCC;
+        }
+
+        .output-preview {
+            flex: 1;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #52526A;
+            font-size: 11px;
+            color: #CCCCCC;
+            line-height: 1.5;
+        }
+
+        .output-preview .line {
+            margin-bottom: 3px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .planning-status-bar {
+            background: #1B4F8F;
+            border: 1px solid #9999CC;
+            border-radius: 4px;
+            padding: 8px 12px;
+            margin-bottom: 12px;
+            display: flex;
+            gap: 24px;
+            font-size: 12px;
+        }
+
+        .status-item {
+            color: #F5F6FA;
+        }
+
+        .status-label {
+            color: #CCCCCC;
+        }
+
+        .status-value {
+            color: #FF9966;
+            font-weight: bold;
+        }
+
+        .toolbar {
+            border-top: 1px solid #52526A;
+            padding-top: 12px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .toolbar-button {
+            color: #CCCCCC;
+            font-size: 12px;
+        }
+
+        .toolbar-button .key {
+            color: #FF9966;
+            font-weight: bold;
+        }
+
+        .toolbar-button .label {
+            color: #F5F6FA;
+        }
+
+        .spinner {
+            display: inline-block;
+            color: #CC99CC;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { content: '⠋'; }
+            12.5% { content: '⠙'; }
+            25% { content: '⠹'; }
+            37.5% { content: '⠸'; }
+            50% { content: '⠼'; }
+            62.5% { content: '⠴'; }
+            75% { content: '⠦'; }
+            87.5% { content: '⠧'; }
+            100% { content: '⠇'; }
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal-frame">
+        <div class="terminal-titlebar">
+            <div class="terminal-dots">
+                <div class="dot red"></div>
+                <div class="dot yellow"></div>
+                <div class="dot green"></div>
+            </div>
+            <div class="terminal-title">ship-commander-3 — ready-room</div>
+        </div>
+        <div class="terminal-body">
+            <div class="header">
+                <div class="header-title">╭─ READY ROOM ── USS ENTERPRISE ─╮</div>
+                <div class="header-directive">Directive: Multi-Region Deployment System</div>
+                <div class="header-meta">
+                    <span class="meta-item">Iteration 2/3</span>
+                    <span class="meta-item">Questions: 0</span>
+                    <span class="meta-item">Crew: 4 active</span>
+                </div>
+            </div>
+
+            <div class="planning-status-bar">
+                <div class="status-item">
+                    <span class="status-label">Planning:</span> <span class="status-value">Iteration 2/3</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Coverage:</span> <span class="status-value">85%</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Sign-offs:</span> <span class="status-value">2/4</span>
+                </div>
+            </div>
+
+            <div class="planning-content">
+                <div class="directive-sidebar">
+                    <h3>Multi-Region Deployment System</h3>
+                    <p>Implement a robust multi-region deployment pipeline that enables seamless rollouts across global infrastructure with zero-downtime guarantees and automated rollback capabilities.</p>
+
+                    <h4>Use Cases</h4>
+                    <ul>
+                        <li><span class="coverage-status covered">✓</span> Deploy to multiple regions simultaneously</li>
+                        <li><span class="coverage-status covered">✓</span> Progressive rollout with canary testing</li>
+                        <li><span class="coverage-status partial">⚠</span> Automated health checks and rollback</li>
+                        <li><span class="coverage-status uncovered">✗</span> Cross-region traffic management</li>
+                        <li><span class="coverage-status partial">⚠</span> Deployment status monitoring dashboard</li>
+                    </ul>
+
+                    <h4>Acceptance Criteria</h4>
+                    <ul>
+                        <li>• Zero-downtime deployments verified</li>
+                        <li>• Rollback completes within 60 seconds</li>
+                        <li>• Regional health monitoring active</li>
+                        <li>• Deployment metrics tracked</li>
+                    </ul>
+
+                    <h4>Scope Boundaries</h4>
+                    <p><strong>In Scope:</strong> Deployment orchestration, health checks, automated rollback, regional failover</p>
+                    <p><strong>Out of Scope:</strong> Infrastructure provisioning, DNS management, CDN configuration</p>
+                </div>
+
+                <div class="crew-session-grid">
+                    <div class="specialist-card working">
+                        <div class="card-header">
+                            <div>
+                                <div class="specialist-name">Cmdr. Data</div>
+                                <div class="role-badge">System Architect</div>
+                            </div>
+                            <div class="status-badge working">● WORKING</div>
+                        </div>
+                        <div class="session-meta">
+                            <span>claude-opus-4-6</span>
+                            <span>⏱ 2m 34s</span>
+                        </div>
+                        <div class="output-preview">
+                            <div class="line">Analyzing deployment topology constraints...</div>
+                            <div class="line">Proposing orchestration layer using Kubernetes operators</div>
+                            <div class="line">Cross-region state synchronization requires distributed consensus</div>
+                        </div>
+                    </div>
+
+                    <div class="specialist-card done">
+                        <div class="card-header">
+                            <div>
+                                <div class="specialist-name">Lt. Cmdr. LaForge</div>
+                                <div class="role-badge">Infrastructure Lead</div>
+                            </div>
+                            <div class="status-badge done">✓ DONE</div>
+                        </div>
+                        <div class="session-meta">
+                            <span>claude-sonnet-4-5</span>
+                            <span>⏱ 4m 12s</span>
+                        </div>
+                        <div class="output-preview">
+                            <div class="line">✓ Regional cluster configuration validated</div>
+                            <div class="line">✓ Network topology for cross-region traffic defined</div>
+                            <div class="line">✓ Proposed multi-AZ deployment strategy with 3 zones per region</div>
+                        </div>
+                    </div>
+
+                    <div class="specialist-card working">
+                        <div class="card-header">
+                            <div>
+                                <div class="specialist-name">Lt. Torres</div>
+                                <div class="role-badge">Backend Engineer</div>
+                            </div>
+                            <div class="status-badge working">● WORKING</div>
+                        </div>
+                        <div class="session-meta">
+                            <span>claude-sonnet-4-5</span>
+                            <span>⏱ 1m 58s</span>
+                        </div>
+                        <div class="output-preview">
+                            <div class="line">Designing health check endpoints for regional services...</div>
+                            <div class="line">HTTP /health and /ready endpoints with dependency checks</div>
+                            <div class="line">Implementing circuit breaker pattern for inter-region calls</div>
+                        </div>
+                    </div>
+
+                    <div class="specialist-card done">
+                        <div class="card-header">
+                            <div>
+                                <div class="specialist-name">Ens. Kim</div>
+                                <div class="role-badge">DevOps Specialist</div>
+                            </div>
+                            <div class="status-badge done">✓ DONE</div>
+                        </div>
+                        <div class="session-meta">
+                            <span>claude-sonnet-4-5</span>
+                            <span>⏱ 3m 47s</span>
+                        </div>
+                        <div class="output-preview">
+                            <div class="line">✓ CI/CD pipeline stages defined for multi-region flow</div>
+                            <div class="line">✓ Canary deployment strategy: 5% → 25% → 50% → 100%</div>
+                            <div class="line">✓ Rollback automation triggers on error rate > 2%</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="toolbar">
+                <span class="toolbar-button"><span class="key">[a]</span> <span class="label">Approve</span></span>
+                <span class="toolbar-button"><span class="key">[f]</span> <span class="label">Feedback</span></span>
+                <span class="toolbar-button"><span class="key">[s]</span> <span class="label">Shelve</span></span>
+                <span class="toolbar-button"><span class="key">[v]</span> <span class="label">Review Plan</span></span>
+                <span class="toolbar-button"><span class="key">[t]</span> <span class="label">Toggle Directive</span></span>
+                <span class="toolbar-button"><span class="key">[?]</span> <span class="label">Help</span></span>
+                <span class="toolbar-button"><span class="key">[Esc]</span> <span class="label">Bridge</span></span>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

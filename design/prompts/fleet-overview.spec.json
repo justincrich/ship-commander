@@ -1,0 +1,259 @@
+{
+  "design_key": "fleet-overview",
+  "name": "Fleet Overview",
+  "version": "2.0",
+  "description": "Landing screen showing all ships with summary stats, fleet health, and quick actions for fleet-wide management.",
+  "screen": {
+    "type": "primary",
+    "parent": "app-root",
+    "children": [
+      "ship-bridge",
+      "fleet-monitor",
+      "agent-roster",
+      "directive-editor",
+      "message-center",
+      "project-settings"
+    ],
+    "mode_availability": {
+      "basic": true,
+      "advanced": true,
+      "executive": true
+    }
+  },
+  "layout": {
+    "structure": "HeaderBar | ShipList (60%) + ShipPreview (40%) | NavigableToolbar",
+    "rows": [
+      {
+        "name": "header",
+        "height": 3,
+        "panels": [
+          {
+            "id": "header-bar",
+            "width": "100%",
+            "description": "Fleet header with title, ship counts, launched count, pending messages badge, and fleet health. Row 1: 'FLEET COMMAND' gold bold, ship count, launched count, pending messages (pink badge), fleet health. Row 2: fleet metrics inline."
+          }
+        ]
+      },
+      {
+        "name": "main-content",
+        "height": "fill",
+        "panels": [
+          {
+            "id": "ship-list",
+            "width": "60%",
+            "description": "Scrollable list of ShipCards. Each card shows ship name (bold butterscotch), ship class (faint), directive title (blue or 'No Directive' galaxy_gray), crew count, mission progress bar, and status badge (DOCKED/LAUNCHED/COMPLETE/HALTED). Selected card has moonlit_violet border. Sorted: launched first, then docked, then complete."
+          },
+          {
+            "id": "ship-preview",
+            "width": "40%",
+            "description": "Preview panel for the currently selected ship. Shows ship name+class header, directive summary (Glamour rendered), crew roster mini list, mission progress, recent activity (last 5 events), and available actions."
+          }
+        ]
+      },
+      {
+        "name": "toolbar",
+        "height": 1,
+        "panels": [
+          {
+            "id": "navigable-toolbar",
+            "width": "100%",
+            "description": "Bottom toolbar with fleet-level actions navigable via arrow keys or quick keys."
+          }
+        ]
+      }
+    ],
+    "responsive": {
+      "standard": {
+        "min_width": 120,
+        "description": "Side-by-side layout with ship list (60%) and ship preview (40%). Full header with all fleet metrics displayed inline."
+      },
+      "compact": {
+        "threshold": "<120 cols",
+        "description": "Ship list takes full width, preview panel hidden. Fleet summary collapses to a single line. Enter on a ship goes directly to bridge."
+      }
+    }
+  },
+  "components": [
+    {
+      "name": "HeaderBar",
+      "charm_base": "lipgloss.Style",
+      "tokens_used": ["gold", "butterscotch", "pink", "space_white", "green_ok", "red_alert"],
+      "variants": ["fleet"]
+    },
+    {
+      "name": "ShipCard",
+      "charm_base": "lipgloss.Style",
+      "tokens_used": ["butterscotch", "blue", "galaxy_gray", "moonlit_violet", "space_white", "light_gray"],
+      "variants": ["selected", "docked", "launched", "complete", "halted"]
+    },
+    {
+      "name": "ShipPreviewPanel",
+      "charm_base": "lipgloss.Style / glamour.Render",
+      "tokens_used": ["butterscotch", "blue", "space_white", "light_gray", "dark_blue"],
+      "variants": ["standard", "empty"]
+    },
+    {
+      "name": "StatusBadge",
+      "charm_base": "lipgloss.Style",
+      "tokens_used": ["green_ok", "butterscotch", "blue", "galaxy_gray", "red_alert"],
+      "variants": ["DOCKED", "LAUNCHED", "COMPLETE", "HALTED"]
+    },
+    {
+      "name": "WaveProgressBar",
+      "charm_base": "bubbles/progress",
+      "tokens_used": ["butterscotch", "green_ok", "galaxy_gray"],
+      "variants": ["standard", "compact"]
+    },
+    {
+      "name": "CrewRosterMini",
+      "charm_base": "lipgloss.Style",
+      "tokens_used": ["space_white", "light_gray", "gold", "blue", "butterscotch"],
+      "variants": ["standard"]
+    },
+    {
+      "name": "NavigableToolbar",
+      "charm_base": "lipgloss.Style",
+      "tokens_used": ["butterscotch", "space_white", "galaxy_gray", "moonlit_violet"],
+      "variants": ["fleet"]
+    }
+  ],
+  "data_sources": [
+    {
+      "source": "fleet_state",
+      "description": "Complete fleet state including all ships, their statuses, directives, crew assignments, and mission progress."
+    },
+    {
+      "source": "agent_roster",
+      "description": "All registered agents with roles, assignments, and availability status."
+    },
+    {
+      "source": "pending_messages",
+      "description": "Unread messages and pending admiral questions across all ships."
+    },
+    {
+      "source": "fleet_health",
+      "description": "Aggregate fleet health metrics: ships by status, overall mission completion, error rates."
+    }
+  ],
+  "keyboard": {
+    "global": {
+      "Tab": "Cycle focus between panels (ship-list -> ship-preview -> toolbar)",
+      "Shift+Tab": "Cycle focus between panels in reverse",
+      "?": "Show help overlay",
+      "q": "Quit application"
+    },
+    "view_specific": {
+      "Up": "Navigate to previous ship in list",
+      "Down": "Navigate to next ship in list",
+      "Enter": "Open Ship Bridge for selected ship",
+      "n": "Create new ship",
+      "d": "Open directive editor for selected ship",
+      "r": "Open agent roster",
+      "i": "Open inbox / message center",
+      "l": "Launch selected ship",
+      "p": "Open planning (ready room) for selected ship",
+      "a": "Assign crew to selected ship",
+      "m": "Open fleet monitor"
+    },
+    "toolbar_buttons": [
+      { "key": "n", "label": "New", "action": "Create a new ship" },
+      { "key": "d", "label": "Directive", "action": "Open directive editor for selected ship" },
+      { "key": "r", "label": "Roster", "action": "Open agent roster view" },
+      { "key": "i", "label": "Inbox", "action": "Open message center" },
+      { "key": "s", "label": "Settings", "action": "Open project settings" },
+      { "key": "?", "label": "Help", "action": "Show help overlay" },
+      { "key": "q", "label": "Quit", "action": "Quit application" }
+    ]
+  },
+  "transitions": [
+    {
+      "to": "ship-bridge",
+      "trigger": "Enter on selected ship",
+      "type": "push",
+      "animation": {
+        "preset": "slide",
+        "direction": "slide-right"
+      }
+    },
+    {
+      "to": "fleet-monitor",
+      "trigger": "m key",
+      "type": "push",
+      "animation": {
+        "preset": "slide",
+        "direction": "slide-right"
+      }
+    },
+    {
+      "to": "agent-roster",
+      "trigger": "r key",
+      "type": "push",
+      "animation": {
+        "preset": "slide",
+        "direction": "slide-right"
+      }
+    },
+    {
+      "to": "directive-editor",
+      "trigger": "d key",
+      "type": "push",
+      "animation": {
+        "preset": "slide",
+        "direction": "slide-right"
+      }
+    },
+    {
+      "to": "message-center",
+      "trigger": "i key",
+      "type": "push",
+      "animation": {
+        "preset": "slide",
+        "direction": "slide-right"
+      }
+    },
+    {
+      "to": "project-settings",
+      "trigger": "s key",
+      "type": "push",
+      "animation": {
+        "preset": "slide",
+        "direction": "slide-right"
+      }
+    }
+  ],
+  "special_behavior": [
+    {
+      "trigger": "pending_messages > 0",
+      "behavior": "Pink bounce badge animation on the pending questions count in the header. Uses harmonica spring animation for the bounce effect."
+    },
+    {
+      "trigger": "ship status change",
+      "behavior": "Spring animation (harmonica) on the status badge when a ship transitions between states (e.g., DOCKED -> LAUNCHED)."
+    },
+    {
+      "trigger": "fleet is empty (no ships)",
+      "behavior": "Display a welcome/empty state with onboarding instructions: 'No ships in fleet. Press [n] to create your first ship.' Centered in the main content area."
+    }
+  ],
+  "tokens": {
+    "colors": {
+      "primary": "butterscotch (#FF9966)",
+      "accent": "gold (#FFAA00)",
+      "status_colors": {
+        "DOCKED": "blue (#9999CC)",
+        "LAUNCHED": "butterscotch (#FF9966)",
+        "COMPLETE": "green_ok (#33FF33)",
+        "HALTED": "red_alert (#FF3333)"
+      }
+    },
+    "borders": {
+      "default": "lipgloss.RoundedBorder",
+      "focused": "lipgloss.RoundedBorder with moonlit_violet (#9966FF)"
+    },
+    "icons": {
+      "pending_messages": "pink badge indicator",
+      "fleet_health": "color-coded health indicator",
+      "ship_status": "status-colored dot or badge"
+    }
+  }
+}

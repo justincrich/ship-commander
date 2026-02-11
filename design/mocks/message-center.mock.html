@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Message Center - Ship Commander 3</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #1a1a2e;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .terminal-frame {
+            max-width: 1100px;
+            width: 100%;
+            border-radius: 8px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+            overflow: hidden;
+        }
+
+        .title-bar {
+            background: #2D2D2D;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .title-bar-buttons {
+            display: flex;
+            gap: 8px;
+            margin-right: 16px;
+        }
+
+        .title-bar-button {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .title-bar-button.red { background: #FF5F56; }
+        .title-bar-button.yellow { background: #FFBD2E; }
+        .title-bar-button.green { background: #27C93F; }
+
+        .title-bar-text {
+            flex: 1;
+            text-align: center;
+            color: #C4C4C4;
+            font-size: 13px;
+            letter-spacing: 0.5px;
+        }
+
+        .terminal-body {
+            background: #000000;
+            color: #F5F6FA;
+            padding: 20px;
+            font-size: 13px;
+            line-height: 1.4;
+            border-radius: 0 0 8px 8px;
+            min-height: 600px;
+        }
+
+        .header {
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #52526A;
+        }
+
+        .header-title {
+            color: #FF9966;
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 6px;
+        }
+
+        .header-stats {
+            display: flex;
+            gap: 24px;
+            font-size: 12px;
+        }
+
+        .stat-label {
+            color: #9999CC;
+        }
+
+        .stat-value {
+            color: #F5F6FA;
+            font-weight: bold;
+        }
+
+        .badge-urgent {
+            background: #FF3333;
+            color: #000000;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-weight: bold;
+            font-size: 11px;
+        }
+
+        .badge-pending {
+            background: #FF99CC;
+            color: #000000;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-weight: bold;
+            font-size: 11px;
+        }
+
+        .content-area {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        /* Message List (left panel) */
+        .message-list {
+            width: 45%;
+            border: 1px solid #52526A;
+            border-radius: 4px;
+        }
+
+        .list-header {
+            color: #FF9966;
+            font-weight: bold;
+            padding: 8px 12px;
+            border-bottom: 1px solid #52526A;
+            font-size: 12px;
+        }
+
+        .message-item {
+            padding: 8px 12px;
+            border-bottom: 1px solid rgba(82, 82, 106, 0.3);
+            cursor: pointer;
+        }
+
+        .message-item:hover {
+            background: rgba(153, 102, 255, 0.1);
+        }
+
+        .message-item.selected {
+            background: rgba(153, 102, 255, 0.25);
+            border-left: 3px solid #9966FF;
+        }
+
+        .message-item.unread {
+            border-left: 3px solid #FF99CC;
+        }
+
+        .msg-top-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+
+        .msg-sender {
+            font-weight: bold;
+            font-size: 12px;
+        }
+
+        .msg-sender.captain { color: #FFAA00; }
+        .msg-sender.commander { color: #9999CC; }
+        .msg-sender.implementer { color: #FF9966; }
+
+        .msg-time {
+            color: #52526A;
+            font-size: 11px;
+        }
+
+        .msg-ship {
+            color: #52526A;
+            font-size: 11px;
+            margin-bottom: 2px;
+        }
+
+        .msg-preview {
+            color: #CCCCCC;
+            font-size: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .msg-badge {
+            display: inline-block;
+            padding: 1px 5px;
+            border-radius: 2px;
+            font-size: 10px;
+            font-weight: bold;
+            margin-left: 6px;
+        }
+
+        .msg-badge.question { background: #CC99CC; color: #000; }
+        .msg-badge.blocking { background: #FF3333; color: #000; }
+        .msg-badge.answered { background: #33FF33; color: #000; }
+
+        /* Message Detail (right panel) */
+        .message-detail {
+            width: 55%;
+            border: 2px solid #9966FF;
+            border-radius: 4px;
+        }
+
+        .detail-header {
+            padding: 12px;
+            border-bottom: 1px solid #52526A;
+        }
+
+        .detail-title {
+            color: #FF9966;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+
+        .detail-meta {
+            display: flex;
+            gap: 12px;
+            font-size: 11px;
+        }
+
+        .detail-meta-item {
+            color: #52526A;
+        }
+
+        .detail-meta-value {
+            color: #9999CC;
+        }
+
+        .role-badge {
+            display: inline-block;
+            padding: 1px 6px;
+            border-radius: 2px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        .role-badge.captain { background: #FFAA00; color: #000; }
+        .role-badge.commander { background: #9999CC; color: #000; }
+
+        .detail-body {
+            padding: 12px;
+            min-height: 200px;
+        }
+
+        .question-text {
+            color: #F5F6FA;
+            line-height: 1.6;
+            margin-bottom: 16px;
+        }
+
+        .options-section {
+            margin-bottom: 12px;
+        }
+
+        .options-label {
+            color: #9999CC;
+            font-size: 11px;
+            margin-bottom: 6px;
+        }
+
+        .option-item {
+            padding: 4px 8px;
+            color: #CCCCCC;
+        }
+
+        .option-item.selected {
+            color: #9966FF;
+            background: rgba(153, 102, 255, 0.15);
+        }
+
+        .option-cursor {
+            display: inline-block;
+            width: 16px;
+        }
+
+        .detail-footer {
+            padding: 8px 12px;
+            border-top: 1px solid #52526A;
+            color: #52526A;
+            font-size: 11px;
+            text-align: center;
+        }
+
+        .navigable-toolbar {
+            padding: 12px;
+            background: rgba(27, 79, 143, 0.2);
+            border-radius: 4px;
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            border: 1px solid #52526A;
+        }
+
+        .toolbar-button .key {
+            color: #9966FF;
+            font-weight: bold;
+            background: rgba(153, 102, 255, 0.2);
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-right: 4px;
+        }
+
+        .toolbar-button .label {
+            color: #FF9966;
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal-frame">
+        <div class="title-bar">
+            <div class="title-bar-buttons">
+                <div class="title-bar-button red"></div>
+                <div class="title-bar-button yellow"></div>
+                <div class="title-bar-button green"></div>
+            </div>
+            <div class="title-bar-text">ship-commander-3 — Message Center</div>
+        </div>
+        <div class="terminal-body">
+            <!-- Header -->
+            <div class="header">
+                <div class="header-title">╭─ MESSAGE CENTER ─────────────────────────────────────────────────────────────────────────────────────╮</div>
+                <div class="header-stats">
+                    <span><span class="stat-label">Total:</span> <span class="stat-value">8 messages</span></span>
+                    <span><span class="stat-label">Pending:</span> <span class="badge-pending">3</span></span>
+                    <span><span class="stat-label">Blocking:</span> <span class="badge-urgent">1</span></span>
+                    <span><span class="stat-label">Answered:</span> <span class="stat-value">4</span></span>
+                </div>
+            </div>
+
+            <!-- Content Area -->
+            <div class="content-area">
+                <!-- Message List -->
+                <div class="message-list">
+                    <div class="list-header">INBOX │ 3 pending</div>
+
+                    <div class="message-item selected unread">
+                        <div class="msg-top-row">
+                            <span class="msg-sender captain">capt-alpha</span>
+                            <span class="msg-time">2 min ago</span>
+                        </div>
+                        <div class="msg-ship">SS Enterprise · MISSION-03 <span class="msg-badge blocking">BLOCKING</span></div>
+                        <div class="msg-preview">Which session store approach for JWT...</div>
+                    </div>
+
+                    <div class="message-item unread">
+                        <div class="msg-top-row">
+                            <span class="msg-sender commander">cmdr-beta</span>
+                            <span class="msg-time">15 min ago</span>
+                        </div>
+                        <div class="msg-ship">Nautilus · MISSION-11 <span class="msg-badge question">QUESTION</span></div>
+                        <div class="msg-preview">Should API versioning use path or header...</div>
+                    </div>
+
+                    <div class="message-item unread">
+                        <div class="msg-top-row">
+                            <span class="msg-sender implementer">impl-charlie</span>
+                            <span class="msg-time">32 min ago</span>
+                        </div>
+                        <div class="msg-ship">SS Enterprise · MISSION-04 <span class="msg-badge question">QUESTION</span></div>
+                        <div class="msg-preview">The existing test helper uses a deprecated...</div>
+                    </div>
+
+                    <div class="message-item">
+                        <div class="msg-top-row">
+                            <span class="msg-sender captain">capt-echo</span>
+                            <span class="msg-time">1h ago</span>
+                        </div>
+                        <div class="msg-ship">Nautilus · MISSION-10 <span class="msg-badge answered">ANSWERED</span></div>
+                        <div class="msg-preview">Confirmed: use PostgreSQL for persistence</div>
+                    </div>
+
+                    <div class="message-item">
+                        <div class="msg-top-row">
+                            <span class="msg-sender commander">cmdr-lima</span>
+                            <span class="msg-time">2h ago</span>
+                        </div>
+                        <div class="msg-ship">Discovery · MISSION-20 <span class="msg-badge answered">ANSWERED</span></div>
+                        <div class="msg-preview">Design approved with minor revisions...</div>
+                    </div>
+                </div>
+
+                <!-- Message Detail -->
+                <div class="message-detail">
+                    <div class="detail-header">
+                        <div class="detail-title">ADMIRAL -- QUESTION FROM capt-alpha</div>
+                        <div class="detail-meta">
+                            <span><span class="detail-meta-item">Ship:</span> <span class="detail-meta-value">SS Enterprise</span></span>
+                            <span><span class="detail-meta-item">Mission:</span> <span class="detail-meta-value">MISSION-03</span></span>
+                            <span><span class="role-badge captain">CAPTAIN</span></span>
+                            <span class="msg-badge blocking" style="font-size: 10px;">BLOCKING</span>
+                        </div>
+                    </div>
+
+                    <div class="detail-body">
+                        <div class="question-text">
+                            The authentication module requires a session store.<br>
+                            Which approach should I use for the JWT token storage?<br><br>
+                            Context: The PRD specifies "secure token management" but<br>
+                            does not prescribe a specific implementation. Current<br>
+                            infrastructure includes Redis and PostgreSQL.
+                        </div>
+
+                        <div class="options-section">
+                            <div class="options-label">Select response:</div>
+                            <div class="option-item selected">
+                                <span class="option-cursor">></span> Redis-backed session store (recommended for production)
+                            </div>
+                            <div class="option-item">
+                                <span class="option-cursor"> </span> Browser localStorage with httpOnly cookies
+                            </div>
+                            <div class="option-item">
+                                <span class="option-cursor"> </span> In-memory store (simplest, no persistence)
+                            </div>
+                            <div class="option-item">
+                                <span class="option-cursor"> </span> Database-backed sessions
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="detail-footer">
+                        Press <strong style="color: #9966FF;">Enter</strong> to answer · <strong style="color: #9966FF;">b</strong> to broadcast · <strong style="color: #52526A;">Esc</strong> to close
+                    </div>
+                </div>
+            </div>
+
+            <!-- Navigable Toolbar -->
+            <div class="navigable-toolbar">
+                <span class="toolbar-button">
+                    <span class="key">Enter</span>
+                    <span class="label">Answer</span>
+                </span>
+                <span class="toolbar-button">
+                    <span class="key">j/k</span>
+                    <span class="label">Navigate</span>
+                </span>
+                <span class="toolbar-button">
+                    <span class="key">f</span>
+                    <span class="label">Filter</span>
+                </span>
+                <span class="toolbar-button">
+                    <span class="key">?</span>
+                    <span class="label">Help</span>
+                </span>
+                <span class="toolbar-button">
+                    <span class="key">Esc</span>
+                    <span class="label">Fleet</span>
+                </span>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

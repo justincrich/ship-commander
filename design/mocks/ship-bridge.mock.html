@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ship Bridge - USS Enterprise</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #1a1a2e;
+      font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+      font-size: 13px;
+      line-height: 1.4;
+      color: #F5F6FA;
+      padding: 40px 20px;
+      overflow-x: hidden;
+    }
+
+    .terminal-frame {
+      max-width: 1100px;
+      margin: 0 auto;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .title-bar {
+      background: #2D2D2D;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      border-radius: 8px 8px 0 0;
+      position: relative;
+    }
+
+    .window-controls {
+      display: flex;
+      gap: 8px;
+    }
+
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .dot.red { background: #FF5F56; }
+    .dot.yellow { background: #FFBD2E; }
+    .dot.green { background: #27C93F; }
+
+    .window-title {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #999;
+      font-size: 12px;
+    }
+
+    .terminal-body {
+      background: #000000;
+      padding: 20px;
+      min-height: 600px;
+      border-radius: 0 0 8px 8px;
+    }
+
+    /* LCARS Colors */
+    .butterscotch { color: #FF9966; }
+    .blue { color: #9999CC; }
+    .purple { color: #CC99CC; }
+    .pink { color: #FF99CC; }
+    .gold { color: #FFAA00; }
+    .almond { color: #FFAA90; }
+    .red-alert { color: #FF3333; }
+    .yellow-caution { color: #FFCC00; }
+    .green-ok { color: #33FF33; }
+    .galaxy-gray { color: #52526A; }
+    .space-white { color: #F5F6FA; }
+    .light-gray { color: #CCCCCC; }
+    .moonlit-violet { color: #9966FF; }
+    .ice { color: #99CCFF; }
+
+    .bg-butterscotch { background: #FF9966; color: #000; }
+    .bg-blue { background: #9999CC; color: #000; }
+    .bg-gold { background: #FFAA00; color: #000; }
+    .bg-green-ok { background: #33FF33; color: #000; }
+    .bg-red-alert { background: #FF3333; color: #000; }
+    .bg-yellow-caution { background: #FFCC00; color: #000; }
+    .bg-galaxy-gray { background: #52526A; color: #F5F6FA; }
+    .bg-moonlit-violet { background: #9966FF; color: #000; }
+
+    /* Header */
+    .ship-header {
+      border: 1px solid #9999CC;
+      border-radius: 6px;
+      padding: 10px 16px;
+      margin-bottom: 16px;
+    }
+
+    .ship-header-row1 {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 6px;
+    }
+
+    .ship-name {
+      font-weight: bold;
+      font-size: 16px;
+    }
+
+    .ship-class {
+      opacity: 0.5;
+      font-size: 11px;
+    }
+
+    .badge {
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+
+    .ship-header-row2 {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      font-size: 12px;
+    }
+
+    .wave-progress {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .progress-bar {
+      display: inline-flex;
+      gap: 1px;
+    }
+
+    .progress-bar span {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      background: #52526A;
+    }
+
+    .progress-bar span.filled {
+      background: #FF9966;
+    }
+
+    /* Main Layout */
+    .main-layout {
+      display: grid;
+      grid-template-columns: 40% 60%;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    /* Crew Panel */
+    .crew-panel {
+      border: 1px solid #9999CC;
+      border-radius: 6px;
+      padding: 12px;
+    }
+
+    .panel-title {
+      font-weight: bold;
+      margin-bottom: 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #52526A;
+    }
+
+    .agent-card {
+      border: 1px solid #52526A;
+      border-radius: 4px;
+      padding: 8px;
+      margin-bottom: 8px;
+      background: rgba(82, 82, 106, 0.1);
+    }
+
+    .agent-card.selected {
+      border-color: #9966FF;
+      background: rgba(153, 102, 255, 0.1);
+    }
+
+    .agent-card-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .agent-name {
+      font-weight: bold;
+    }
+
+    .role-badge {
+      padding: 1px 6px;
+      border-radius: 2px;
+      font-size: 10px;
+      font-weight: bold;
+    }
+
+    .status-icon {
+      font-size: 10px;
+    }
+
+    .agent-details {
+      font-size: 11px;
+      line-height: 1.6;
+      opacity: 0.9;
+    }
+
+    /* Mission Board */
+    .mission-board {
+      border: 1px solid #9999CC;
+      border-radius: 6px;
+      padding: 12px;
+    }
+
+    .board-header {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #52526A;
+      font-size: 11px;
+    }
+
+    .board-column-header {
+      font-weight: bold;
+    }
+
+    .mission-columns {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+      max-height: 280px;
+      overflow-y: auto;
+    }
+
+    .mission-column {
+      min-height: 100px;
+    }
+
+    .mission-card {
+      border: 1px solid #52526A;
+      border-radius: 3px;
+      padding: 6px;
+      margin-bottom: 6px;
+      font-size: 11px;
+      background: rgba(82, 82, 106, 0.05);
+    }
+
+    .mission-id {
+      font-weight: bold;
+      margin-bottom: 3px;
+    }
+
+    .mission-title {
+      margin-bottom: 4px;
+      opacity: 0.9;
+    }
+
+    .mission-meta {
+      font-size: 10px;
+      opacity: 0.7;
+      margin-bottom: 3px;
+    }
+
+    .phase-dots {
+      display: flex;
+      gap: 2px;
+      margin-top: 4px;
+    }
+
+    .phase-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #52526A;
+    }
+
+    .phase-dot.red { background: #FF3333; }
+    .phase-dot.green { background: #33FF33; }
+    .phase-dot.butterscotch { background: #FF9966; }
+
+    /* Event Log */
+    .event-log {
+      border: 1px solid #9999CC;
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 16px;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+
+    .event-row {
+      font-size: 12px;
+      margin-bottom: 4px;
+      display: flex;
+      gap: 8px;
+    }
+
+    .event-timestamp {
+      opacity: 0.6;
+    }
+
+    .event-icon {
+      width: 14px;
+    }
+
+    .event-message {
+      flex: 1;
+    }
+
+    /* Toolbar */
+    .toolbar {
+      border: 1px solid #9999CC;
+      border-radius: 6px;
+      padding: 10px 16px;
+      display: flex;
+      gap: 24px;
+      align-items: center;
+    }
+
+    .toolbar-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .toolbar-key {
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-weight: bold;
+      font-size: 11px;
+    }
+
+    .toolbar-label {
+      font-size: 12px;
+    }
+
+    /* Scrollbar styling */
+    .mission-columns::-webkit-scrollbar,
+    .event-log::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .mission-columns::-webkit-scrollbar-track,
+    .event-log::-webkit-scrollbar-track {
+      background: #000;
+    }
+
+    .mission-columns::-webkit-scrollbar-thumb,
+    .event-log::-webkit-scrollbar-thumb {
+      background: #52526A;
+      border-radius: 4px;
+    }
+
+    .mission-columns::-webkit-scrollbar-thumb:hover,
+    .event-log::-webkit-scrollbar-thumb:hover {
+      background: #9999CC;
+    }
+  </style>
+</head>
+<body>
+  <div class="terminal-frame">
+    <div class="title-bar">
+      <div class="window-controls">
+        <div class="dot red"></div>
+        <div class="dot yellow"></div>
+        <div class="dot green"></div>
+      </div>
+      <div class="window-title">ship-bridge — USS Enterprise</div>
+    </div>
+
+    <div class="terminal-body">
+      <!-- Ship Header -->
+      <div class="ship-header">
+        <div class="ship-header-row1">
+          <span class="ship-name butterscotch">USS Enterprise</span>
+          <span class="ship-class light-gray">Galaxy-class</span>
+          <span class="blue">Directive: Implement authentication system</span>
+          <span class="badge bg-butterscotch">LAUNCHED</span>
+        </div>
+        <div class="ship-header-row2">
+          <span class="light-gray">Health: <span class="green-ok">●●●●●</span></span>
+          <span class="light-gray">Crew: <span class="space-white">4/4</span></span>
+          <span class="light-gray">Missions: <span class="space-white">7/12</span></span>
+          <div class="wave-progress">
+            <span class="light-gray">Wave 2 of 3</span>
+            <div class="progress-bar">
+              <span class="filled"></span>
+              <span class="filled"></span>
+              <span class="filled"></span>
+              <span class="filled"></span>
+              <span class="filled"></span>
+              <span class="filled"></span>
+              <span class="filled"></span>
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+          </div>
+          <span class="badge bg-gold" title="Question pending">?</span>
+        </div>
+      </div>
+
+      <!-- Main Layout: Crew + Mission Board -->
+      <div class="main-layout">
+        <!-- Crew Panel -->
+        <div class="crew-panel">
+          <div class="panel-title butterscotch">╭─ Crew (4) ─╮</div>
+
+          <div class="agent-card selected">
+            <div class="agent-card-header">
+              <span class="status-icon green-ok">▸</span>
+              <span class="agent-name space-white">Riker</span>
+              <span class="role-badge bg-gold">CAPTAIN</span>
+            </div>
+            <div class="agent-details">
+              <div class="light-gray">Mission: <span class="blue">M-003</span> Auth middleware</div>
+              <div class="light-gray">Phase: <span class="butterscotch">RED</span> → <span class="yellow-caution">REFACTOR</span></div>
+              <div class="light-gray">Elapsed: <span class="space-white">04:23</span></div>
+            </div>
+          </div>
+
+          <div class="agent-card">
+            <div class="agent-card-header">
+              <span class="status-icon green-ok">▸</span>
+              <span class="agent-name space-white">Data</span>
+              <span class="role-badge bg-blue">COMMANDER</span>
+            </div>
+            <div class="agent-details">
+              <div class="light-gray">Mission: <span class="blue">M-007</span> JWT validation</div>
+              <div class="light-gray">Phase: <span class="green-ok">GREEN</span> → <span class="butterscotch">VERIFY_GREEN</span></div>
+              <div class="light-gray">Elapsed: <span class="space-white">02:15</span></div>
+            </div>
+          </div>
+
+          <div class="agent-card">
+            <div class="agent-card-header">
+              <span class="status-icon yellow-caution">⚠</span>
+              <span class="agent-name space-white">La Forge</span>
+              <span class="role-badge bg-butterscotch">ENSIGN</span>
+            </div>
+            <div class="agent-details">
+              <div class="light-gray">Mission: <span class="blue">M-005</span> Password hashing</div>
+              <div class="light-gray">Phase: <span class="red-alert">RED</span> <span class="yellow-caution">STUCK</span></div>
+              <div class="light-gray">Elapsed: <span class="yellow-caution">12:47</span></div>
+            </div>
+          </div>
+
+          <div class="agent-card">
+            <div class="agent-card-header">
+              <span class="status-icon green-ok">✓</span>
+              <span class="agent-name space-white">Troi</span>
+              <span class="role-badge bg-butterscotch">ENSIGN</span>
+            </div>
+            <div class="agent-details">
+              <div class="light-gray">Mission: <span class="green-ok">M-001</span> User model</div>
+              <div class="light-gray">Phase: <span class="green-ok">COMPLETE</span></div>
+              <div class="light-gray">Elapsed: <span class="galaxy-gray">08:32</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mission Board -->
+        <div class="mission-board">
+          <div class="panel-title butterscotch">╭─ Mission Board ─╮</div>
+          <div class="board-header">
+            <span class="board-column-header galaxy-gray">B:2</span>
+            <span class="board-column-header butterscotch">IP:3</span>
+            <span class="board-column-header purple">R:1</span>
+            <span class="board-column-header green-ok">D:1</span>
+            <span class="board-column-header red-alert">H:0</span>
+          </div>
+
+          <div class="mission-columns">
+            <!-- Backlog -->
+            <div class="mission-column">
+              <div class="mission-card">
+                <div class="mission-id galaxy-gray">M-008</div>
+                <div class="mission-title light-gray">Session store</div>
+                <div class="mission-meta galaxy-gray">Unassigned</div>
+                <div class="phase-dots">
+                  <span class="phase-dot"></span>
+                  <span class="phase-dot"></span>
+                  <span class="phase-dot"></span>
+                  <span class="phase-dot"></span>
+                  <span class="phase-dot"></span>
+                  <span class="phase-dot"></span>
+                </div>
+              </div>
+              <div class="mission-card">
+                <div class="mission-id galaxy-gray">M-012</div>
+                <div class="mission-title light-gray">OAuth provider</div>
+                <div class="mission-meta galaxy-gray">Unassigned</div>
+                <div class="phase-dots">
+                  <span class="phase-dot"></span>
+                  <span class="phase-dot"></span>
+                  <span class="phase-dot"></span>
+                  <span class="phase-dot"></span>
+                  <span class="phase-dot"></span>
+                  <span class="phase-dot"></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- In Progress -->
+            <div class="mission-column">
+              <div class="mission-card">
+                <div class="mission-id butterscotch">M-003</div>
+                <div class="mission-title light-gray">Auth middleware</div>
+                <div class="mission-meta butterscotch">Riker</div>
+                <div class="phase-dots">
+                  <span class="phase-dot red"></span>
+                  <span class="phase-dot red"></span>
+                  <span class="phase-dot green"></span>
+                  <span class="phase-dot butterscotch"></span>
+                  <span class="phase-dot"></span>
+                  <span class="phase-dot"></span>
+                </div>
+              </div>
+              <div class="mission-card">
+                <div class="mission-id butterscotch">M-007</div>
+                <div class="mission-title light-gray">JWT validation</div>
+                <div class="mission-meta blue">Data</div>
+                <div class="phase-dots">
+                  <span class="phase-dot red"></span>
+                  <span class="phase-dot red"></span>
+                  <span class="phase-dot green"></span>
+                  <span class="phase-dot green"></span>
+                  <span class="phase-dot green"></span>
+                  <span class="phase-dot butterscotch"></span>
+                </div>
+              </div>
+              <div class="mission-card">
+                <div class="mission-id yellow-caution">M-005</div>
+                <div class="mission-title light-gray">Password hashing</div>
+                <div class="mission-meta butterscotch">La Forge ⚠</div>
+                <div class="phase-dots">
+                  <span class="phase-dot red"></span>
+                  <span class="phase-dot"></span>
+                  <span class="phase-dot"></span>
+                  <span class="phase-dot"></span>
+                  <span class="phase-dot"></span>
+                  <span class="phase-dot"></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Review -->
+            <div class="mission-column">
+              <div class="mission-card">
+                <div class="mission-id purple">M-002</div>
+                <div class="mission-title light-gray">Login endpoint</div>
+                <div class="mission-meta purple">Under review</div>
+                <div class="phase-dots">
+                  <span class="phase-dot red"></span>
+                  <span class="phase-dot red"></span>
+                  <span class="phase-dot green"></span>
+                  <span class="phase-dot green"></span>
+                  <span class="phase-dot green"></span>
+                  <span class="phase-dot green"></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Done -->
+            <div class="mission-column">
+              <div class="mission-card">
+                <div class="mission-id green-ok">M-001</div>
+                <div class="mission-title light-gray">User model</div>
+                <div class="mission-meta green-ok">Troi ✓</div>
+                <div class="phase-dots">
+                  <span class="phase-dot green"></span>
+                  <span class="phase-dot green"></span>
+                  <span class="phase-dot green"></span>
+                  <span class="phase-dot green"></span>
+                  <span class="phase-dot green"></span>
+                  <span class="phase-dot green"></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Halted -->
+            <div class="mission-column">
+              <!-- Empty -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Event Log -->
+      <div class="event-log">
+        <div class="panel-title butterscotch" style="margin-bottom: 8px;">╭─ Event Log ─╮</div>
+
+        <div class="event-row">
+          <span class="event-timestamp light-gray">14:37:22</span>
+          <span class="event-icon blue">ℹ</span>
+          <span class="event-message space-white">Data completed mission M-007 gate VERIFY_GREEN ✓</span>
+        </div>
+
+        <div class="event-row">
+          <span class="event-timestamp light-gray">14:35:18</span>
+          <span class="event-icon yellow-caution">⚠</span>
+          <span class="event-message yellow-caution">La Forge stuck on M-005 phase RED (attempt 3/5)</span>
+        </div>
+
+        <div class="event-row">
+          <span class="event-timestamp light-gray">14:32:05</span>
+          <span class="event-icon blue">ℹ</span>
+          <span class="event-message space-white">Riker advancing M-003 to phase REFACTOR</span>
+        </div>
+
+        <div class="event-row">
+          <span class="event-timestamp light-gray">14:28:41</span>
+          <span class="event-icon green-ok">✓</span>
+          <span class="event-message green-ok">Troi completed mission M-001 ALL_GATES_GREEN</span>
+        </div>
+
+        <div class="event-row">
+          <span class="event-timestamp light-gray">14:25:33</span>
+          <span class="event-icon blue">ℹ</span>
+          <span class="event-message space-white">Data started mission M-007 (JWT validation)</span>
+        </div>
+
+        <div class="event-row">
+          <span class="event-timestamp light-gray">14:23:12</span>
+          <span class="event-icon blue">ℹ</span>
+          <span class="event-message space-white">Riker started mission M-003 (Auth middleware)</span>
+        </div>
+
+        <div class="event-row">
+          <span class="event-timestamp light-gray">14:20:47</span>
+          <span class="event-icon blue">ℹ</span>
+          <span class="event-message space-white">Wave 2 initialized with 4 missions</span>
+        </div>
+
+        <div class="event-row">
+          <span class="event-timestamp light-gray">14:18:22</span>
+          <span class="event-icon green-ok">✓</span>
+          <span class="event-message green-ok">Wave 1 completed (4/4 missions)</span>
+        </div>
+      </div>
+
+      <!-- Toolbar -->
+      <div class="toolbar">
+        <div class="toolbar-item">
+          <span class="toolbar-key bg-butterscotch">h</span>
+          <span class="toolbar-label light-gray">Halt</span>
+        </div>
+        <div class="toolbar-item">
+          <span class="toolbar-key bg-butterscotch">r</span>
+          <span class="toolbar-label light-gray">Retry</span>
+        </div>
+        <div class="toolbar-item">
+          <span class="toolbar-key bg-butterscotch">w</span>
+          <span class="toolbar-label light-gray">Wave</span>
+        </div>
+        <div class="toolbar-item">
+          <span class="toolbar-key bg-butterscotch">d</span>
+          <span class="toolbar-label light-gray">Dock</span>
+        </div>
+        <div class="toolbar-item">
+          <span class="toolbar-key bg-butterscotch">?</span>
+          <span class="toolbar-label light-gray">Help</span>
+        </div>
+        <div class="toolbar-item">
+          <span class="toolbar-key bg-moonlit-violet">Esc</span>
+          <span class="toolbar-label light-gray">Fleet</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

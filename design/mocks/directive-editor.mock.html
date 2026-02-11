@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Directive Editor - Ship Commander 3</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #1a1a2e;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .terminal-frame {
+            max-width: 1100px;
+            width: 100%;
+            border-radius: 8px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+            overflow: hidden;
+        }
+
+        .title-bar {
+            background: #2D2D2D;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .title-bar-buttons {
+            display: flex;
+            gap: 8px;
+            margin-right: 16px;
+        }
+
+        .title-bar-button {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .title-bar-button.red { background: #FF5F56; }
+        .title-bar-button.yellow { background: #FFBD2E; }
+        .title-bar-button.green { background: #27C93F; }
+
+        .title-bar-text {
+            flex: 1;
+            text-align: center;
+            color: #C4C4C4;
+            font-size: 13px;
+            letter-spacing: 0.5px;
+        }
+
+        .terminal-body {
+            background: #000000;
+            color: #F5F6FA;
+            padding: 20px;
+            font-size: 13px;
+            line-height: 1.4;
+            border-radius: 0 0 8px 8px;
+            min-height: 650px;
+        }
+
+        .header {
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #52526A;
+        }
+
+        .header-title {
+            color: #FF9966;
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 6px;
+        }
+
+        .header-subtitle {
+            color: #9999CC;
+            font-size: 12px;
+        }
+
+        .form-section {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            color: #FF9966;
+            font-weight: bold;
+            margin-bottom: 6px;
+            font-size: 12px;
+        }
+
+        .form-hint {
+            color: #52526A;
+            font-size: 11px;
+            margin-bottom: 8px;
+        }
+
+        .text-input {
+            width: 100%;
+            background: rgba(153, 153, 204, 0.1);
+            border: 1px solid #52526A;
+            color: #F5F6FA;
+            padding: 8px 12px;
+            font-family: inherit;
+            font-size: 13px;
+            border-radius: 2px;
+        }
+
+        .text-input:focus {
+            border-color: #9966FF;
+            background: rgba(153, 102, 255, 0.1);
+            outline: none;
+        }
+
+        .text-input.focused {
+            border-color: #9966FF;
+            background: rgba(153, 102, 255, 0.1);
+        }
+
+        .text-input::placeholder {
+            color: #52526A;
+        }
+
+        .textarea {
+            width: 100%;
+            height: 220px;
+            background: rgba(153, 153, 204, 0.1);
+            border: 1px solid #52526A;
+            color: #F5F6FA;
+            padding: 12px;
+            font-family: inherit;
+            font-size: 13px;
+            border-radius: 2px;
+            resize: none;
+            line-height: 1.5;
+        }
+
+        .textarea:focus {
+            border-color: #9966FF;
+            background: rgba(153, 102, 255, 0.1);
+            outline: none;
+        }
+
+        .textarea::placeholder {
+            color: #52526A;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 16px;
+        }
+
+        .form-col {
+            flex: 1;
+        }
+
+        .select-input {
+            width: 100%;
+            background: rgba(153, 153, 204, 0.1);
+            border: 1px solid #52526A;
+            color: #F5F6FA;
+            padding: 8px 12px;
+            font-family: inherit;
+            font-size: 13px;
+            border-radius: 2px;
+        }
+
+        .select-option {
+            padding: 4px 12px;
+            color: #CCCCCC;
+        }
+
+        .select-option.selected {
+            color: #9966FF;
+            background: rgba(153, 102, 255, 0.15);
+        }
+
+        .select-option .cursor {
+            display: inline-block;
+            width: 16px;
+        }
+
+        .ship-assignment {
+            border: 1px solid #52526A;
+            border-radius: 4px;
+            padding: 12px;
+            background: rgba(27, 79, 143, 0.1);
+        }
+
+        .assignment-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .assignment-label {
+            color: #9999CC;
+            font-size: 12px;
+        }
+
+        .assignment-action {
+            color: #9966FF;
+            font-size: 11px;
+        }
+
+        .ship-tag {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+
+        .ship-tag.new {
+            background: rgba(255, 153, 102, 0.2);
+            color: #FF9966;
+            border: 1px solid #FF9966;
+        }
+
+        .file-source {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-top: 8px;
+        }
+
+        .file-badge {
+            color: #33FF33;
+            font-size: 11px;
+        }
+
+        .file-path {
+            color: #CCCCCC;
+            font-size: 12px;
+        }
+
+        .char-count {
+            color: #52526A;
+            font-size: 11px;
+            text-align: right;
+            margin-top: 4px;
+        }
+
+        .navigable-toolbar {
+            padding: 12px;
+            background: rgba(27, 79, 143, 0.2);
+            border-radius: 4px;
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            border: 1px solid #52526A;
+            margin-top: 16px;
+        }
+
+        .toolbar-button .key {
+            color: #9966FF;
+            font-weight: bold;
+            background: rgba(153, 102, 255, 0.2);
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-right: 4px;
+        }
+
+        .toolbar-button .label {
+            color: #FF9966;
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal-frame">
+        <div class="title-bar">
+            <div class="title-bar-buttons">
+                <div class="title-bar-button red"></div>
+                <div class="title-bar-button yellow"></div>
+                <div class="title-bar-button green"></div>
+            </div>
+            <div class="title-bar-text">ship-commander-3 — Directive Editor</div>
+        </div>
+        <div class="terminal-body">
+            <!-- Header -->
+            <div class="header">
+                <div class="header-title">╭─ NEW DIRECTIVE ──────────────────────────────────────────────────────────────────────────────────────╮</div>
+                <div class="header-subtitle">Create a new directive (PRD) and assign it to a ship for execution</div>
+            </div>
+
+            <!-- Directive Title -->
+            <div class="form-section">
+                <div class="form-label">DIRECTIVE TITLE</div>
+                <div class="form-hint">A short name for this directive (used as ship name prefix)</div>
+                <input type="text" class="text-input focused" placeholder="e.g., user-authentication, payment-gateway" value="api-documentation">
+            </div>
+
+            <!-- Source Selection -->
+            <div class="form-section">
+                <div class="form-label">PRD SOURCE</div>
+                <div class="form-hint">How would you like to provide the PRD content?</div>
+                <div style="border: 1px solid #52526A; border-radius: 2px; padding: 4px 0;">
+                    <div class="select-option selected"><span class="cursor">></span> Load from file</div>
+                    <div class="select-option"><span class="cursor"> </span> Paste inline</div>
+                    <div class="select-option"><span class="cursor"> </span> Use template</div>
+                </div>
+                <div class="file-source">
+                    <span class="file-badge">[+] loaded</span>
+                    <span class="file-path">./docs/api-documentation-prd.md (2,340 chars)</span>
+                </div>
+            </div>
+
+            <!-- PRD Content Preview -->
+            <div class="form-section">
+                <div class="form-label">PRD CONTENT PREVIEW</div>
+                <textarea class="textarea" readonly># API Documentation Overhaul
+
+## Problem Statement
+Our API documentation is outdated, incomplete, and
+inconsistent across endpoints. Developers report
+spending 2-3x longer integrating than expected.
+
+## Success Criteria
+- AC1: All REST endpoints documented with request/
+  response examples
+- AC2: OpenAPI 3.0 spec generated from source code
+- AC3: Interactive API playground deployed
+- AC4: Authentication flows documented with sequence
+  diagrams</textarea>
+                <div class="char-count">2,340 / 10,000 characters</div>
+            </div>
+
+            <!-- Ship Assignment -->
+            <div class="form-section">
+                <div class="form-label">SHIP ASSIGNMENT</div>
+                <div class="ship-assignment">
+                    <div class="assignment-header">
+                        <span class="assignment-label">This directive will launch a new ship:</span>
+                        <span class="assignment-action">[Tab] to change</span>
+                    </div>
+                    <span class="ship-tag new">USS Api-Documentation</span>
+                    <span style="color: #52526A; font-size: 11px;">(auto-generated from title)</span>
+                </div>
+            </div>
+
+            <!-- Navigable Toolbar -->
+            <div class="navigable-toolbar">
+                <span class="toolbar-button">
+                    <span class="key">Ctrl+S</span>
+                    <span class="label">Launch Ship</span>
+                </span>
+                <span class="toolbar-button">
+                    <span class="key">Tab</span>
+                    <span class="label">Next Field</span>
+                </span>
+                <span class="toolbar-button">
+                    <span class="key">?</span>
+                    <span class="label">Help</span>
+                </span>
+                <span class="toolbar-button">
+                    <span class="key">Esc</span>
+                    <span class="label">Fleet</span>
+                </span>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

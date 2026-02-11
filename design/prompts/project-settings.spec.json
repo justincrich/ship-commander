@@ -1,0 +1,75 @@
+{
+  "design_key": "project-settings",
+  "name": "Project Settings",
+  "version": "2.0",
+  "description": "Global configuration screen. Verification gates (bash commands), crew defaults, fleet defaults, and export/import. Settings are global (not per-project).",
+  "screen": {
+    "type": "top-level",
+    "parent": "fleet-overview",
+    "children": [],
+    "mode_availability": { "basic": true, "advanced": true, "executive": true },
+    "mode_differences": {
+      "basic": ["Simplified gate editor with one-field-per-line", "Crew/fleet defaults show essential fields only", "Export/import has guided wizard flow"],
+      "advanced": ["Full tabbed interface with all configuration options", "Per-role overrides table visible", "Raw JSON preview available for export"],
+      "executive": ["Same as advanced"]
+    }
+  },
+  "layout": {
+    "structure": "SettingsHeader | SettingsTabs (100%) | NavigableToolbar",
+    "rows": [
+      { "name": "header", "height": 2, "panels": [
+        { "id": "settings-header", "width": "100%", "description": "'PROJECT SETTINGS' in bold butterscotch. Current project path and config file location. If imported, shows '[imported from: <source>]' badge." }
+      ]},
+      { "name": "settings-content", "height": "fill", "panels": [
+        { "id": "settings-tabs", "width": "100%", "description": "Tabbed panel with 4 sections navigable with Left/Right or [1]-[4]: Tab 1: Verification Gates (bash commands for test/typecheck/lint/build). Tab 2: Crew Defaults (harness, model, WIP, timeouts). Tab 3: Fleet Defaults (naming, wave strategy, merge policy). Tab 4: Export/Import (serialize/restore settings JSON)." }
+      ]},
+      { "name": "toolbar", "height": 1, "panels": [
+        { "id": "navigable-toolbar", "width": "100%", "description": "NavigableToolbar: [1] Gates  [2] Crew  [3] Fleet  [4] Export  [?] Help  [Esc] Fleet. Tab number keys switch sections." }
+      ]}
+    ],
+    "responsive": {
+      "standard": { "min_width": 120, "description": "Full tabbed layout with inline help text" },
+      "compact": { "threshold": "<120 cols", "description": "Tab headers abbreviated. Form fields stack vertically. Gate list shows name only." }
+    }
+  },
+  "components": [
+    { "name": "SettingsHeader", "charm_base": "lipgloss.JoinHorizontal + lipgloss.NewStyle()", "tokens_used": ["butterscotch", "space_white", "light_gray", "blue"], "variants": ["default", "imported"] },
+    { "name": "SettingsTabs", "charm_base": "lipgloss.JoinVertical + lipgloss.JoinHorizontal + huh.Form", "tokens_used": ["butterscotch", "moonlit_violet", "galaxy_gray", "space_white", "bg_primary"], "variants": ["default", "compact"] },
+    { "name": "GateCommandEditor", "charm_base": "lipgloss.NewStyle() + huh.Input", "tokens_used": ["butterscotch", "galaxy_gray", "space_white", "green_ok", "red_alert"], "variants": ["display", "editing", "disabled"] },
+    { "name": "CrewDefaultsForm", "charm_base": "huh.Form (huh.Select + huh.Input)", "tokens_used": ["butterscotch", "blue", "space_white", "moonlit_violet"], "variants": ["default"] },
+    { "name": "FleetDefaultsForm", "charm_base": "huh.Form (huh.Select + huh.Input)", "tokens_used": ["butterscotch", "blue", "space_white", "moonlit_violet"], "variants": ["default"] },
+    { "name": "ExportImportPanel", "charm_base": "huh.Input + huh.FilePicker + huh.Confirm + bubbles.viewport", "tokens_used": ["butterscotch", "green_ok", "space_white", "light_gray", "moonlit_violet"], "variants": ["export", "import", "preview"] },
+    { "name": "NavigableToolbar", "charm_base": "lipgloss.JoinHorizontal + bubbles.key", "tokens_used": ["butterscotch", "moonlit_violet", "galaxy_gray", "space_white"], "variants": ["default", "navigating"] }
+  ],
+  "data_sources": [
+    { "source": "global_config", "description": "Global sc3 configuration (stored at ~/.sc3/config.json)" },
+    { "source": "gate_commands", "description": "Configured verification gate bash commands" },
+    { "source": "crew_defaults", "description": "Default harness, model, WIP limits, timeouts" },
+    { "source": "fleet_defaults", "description": "Ship naming, wave strategy, merge policy" }
+  ],
+  "keyboard": {
+    "global": { "Tab": "Cycle focus: settings-tabs -> navigable-toolbar", "?": "Help", "q": "Quit" },
+    "view_specific": { "1": "Switch to Verification Gates tab", "2": "Switch to Crew Defaults tab", "3": "Switch to Fleet Defaults tab", "4": "Switch to Export/Import tab", "Up/Down": "Navigate within tab content", "Enter": "Edit selected item / activate button", "e": "Quick export (on Export tab)", "m": "Quick import (on Export tab)", "Escape": "Return to Fleet Overview" },
+    "toolbar_buttons": [
+      { "key": "1", "label": "Gates", "action": "Switch to Verification Gates" },
+      { "key": "2", "label": "Crew", "action": "Switch to Crew Defaults" },
+      { "key": "3", "label": "Fleet", "action": "Switch to Fleet Defaults" },
+      { "key": "4", "label": "Export", "action": "Switch to Export/Import" },
+      { "key": "?", "label": "Help", "action": "Help overlay" },
+      { "key": "Esc", "label": "Fleet", "action": "Return to Fleet Overview" }
+    ]
+  },
+  "transitions": [
+    { "to": "fleet-overview", "trigger": "Escape", "type": "pop", "animation": { "preset": "view_switch", "direction": "slide-left" } }
+  ],
+  "special_behavior": [
+    { "trigger": "Settings imported", "behavior": "All tabs refresh. Success message: 'Settings imported from <path>'. Imported badge shown in header." },
+    { "trigger": "Settings exported", "behavior": "Success message: 'Settings exported to <path>'. File path shown in green_ok." },
+    { "trigger": "Invalid gate command", "behavior": "Gate command editor shows red_alert validation error inline." }
+  ],
+  "tokens": {
+    "colors": { "primary": "butterscotch", "accent": "moonlit_violet" },
+    "borders": { "default": "lipgloss.RoundedBorder() in blue", "focused": "lipgloss.RoundedBorder() in moonlit_violet" },
+    "icons": { "gate_enabled": "\u2713", "gate_disabled": "\u2298", "tab_active": "\u25B8" }
+  }
+}

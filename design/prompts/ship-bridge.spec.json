@@ -1,0 +1,98 @@
+{
+  "design_key": "ship-bridge",
+  "name": "Ship Bridge",
+  "version": "2.0",
+  "description": "Per-ship monitoring and control view showing crew, missions, events, and inline wave summary",
+  "screen": {
+    "type": "drill-down",
+    "parent": "fleet-overview",
+    "children": ["ready-room", "agent-detail", "mission-detail", "wave-manager"],
+    "mode_availability": { "basic": true, "advanced": true, "executive": true },
+    "mode_differences": {
+      "basic": ["EventLog reduced to 4 lines", "AgentGrid simplified cards", "MissionBoard column counts only", "Inline hints"],
+      "advanced": ["All panels visible", "EventLog 8-12 lines", "Full AgentGrid and MissionBoard", "Harmonica animations"],
+      "executive": ["AgentGrid collapsed to summary", "MissionBoard counts + progress %", "EventLog warnings/errors only", "No animations"]
+    }
+  },
+  "layout": {
+    "structure": "ShipHeaderBar | CrewPanel (40%) + MissionBoard (60%) | EventLog (100%) | NavigableToolbar",
+    "rows": [
+      { "name": "header", "height": 3, "panels": [
+        { "id": "ship-header-bar", "width": "100%", "description": "Row 1: Ship name (bold butterscotch), class (faint), directive (blue), status badge. Row 2: Health, crew count, mission progress N/M, wave summary 'Wave K of L [bar]', question badge." }
+      ]},
+      { "name": "crew-and-missions", "height": "60%", "panels": [
+        { "id": "crew-panel", "width": "40%", "description": "AgentCards: name (bold), role badge (Captain=gold, Commander=blue, Ensign=butterscotch), mission, TDD phase, elapsed, status. Stuck=yellow_caution. Selected=moonlit_violet." },
+        { "id": "mission-board", "width": "60%", "description": "Kanban: 'B:N IP:N R:N D:N H:N' color-coded header. Scrollable missions per column. Each: ID, title, classification, agent, phase, AC progress." }
+      ]},
+      { "name": "events", "height": "fill", "panels": [
+        { "id": "event-log", "width": "100%", "description": "Scrollable ship-scoped event log. Last 50 events. [timestamp] [severity-icon] [actor] message. Auto-scroll." }
+      ]},
+      { "name": "toolbar", "height": 1, "panels": [
+        { "id": "navigable-toolbar", "width": "100%", "description": "Context-sensitive. DOCKED: [p] Plan [a] Assign [l] Launch [w] Wave [?] Help [Esc] Fleet. LAUNCHED: [h] Halt [r] Retry [w] Wave [d] Dock [?] Help [Esc] Fleet." }
+      ]}
+    ],
+    "responsive": {
+      "standard": { "min_width": 120, "description": "Full two-column, all panels visible" },
+      "compact": { "threshold": "<120 cols", "description": "Stack vertically, event log 4 lines, wave summary single line" }
+    }
+  },
+  "components": [
+    { "name": "ShipHeaderBar", "charm_base": "lipgloss.JoinHorizontal + lipgloss.NewStyle()", "tokens_used": ["butterscotch", "blue", "gold", "space_white", "green_ok", "red_alert", "pink"], "variants": ["docked", "launched", "complete"] },
+    { "name": "AgentCard", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["butterscotch", "green_ok", "yellow_caution", "red_alert", "galaxy_gray", "blue", "purple", "moonlit_violet"], "variants": ["running", "done", "stuck", "dead", "idle"] },
+    { "name": "MissionBoard", "charm_base": "lipgloss.JoinHorizontal + lipgloss.JoinVertical + bubbles.paginator", "tokens_used": ["blue", "butterscotch", "purple", "green_ok", "red_alert", "galaxy_gray"], "variants": ["summary", "expanded"] },
+    { "name": "MissionCard", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["blue", "red_alert", "butterscotch", "green_ok", "moonlit_violet"], "variants": ["standard_ops", "red_alert", "halted"] },
+    { "name": "EventLog", "charm_base": "bubbles.viewport", "tokens_used": ["blue", "yellow_caution", "red_alert", "space_white", "light_gray"], "variants": ["default", "errors_only", "paused"] },
+    { "name": "EventRow", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["blue", "yellow_caution", "red_alert", "space_white"], "variants": ["info", "warn", "error"] },
+    { "name": "StatusBadge", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["butterscotch", "green_ok", "blue", "galaxy_gray", "red_alert", "yellow_caution"], "variants": ["running", "done", "waiting", "failed", "halted"] },
+    { "name": "ElapsedTimer", "charm_base": "bubbles.stopwatch", "tokens_used": ["light_gray", "yellow_caution", "galaxy_gray"], "variants": ["normal", "warning", "stopped"] },
+    { "name": "Spinner", "charm_base": "bubbles.spinner", "tokens_used": ["butterscotch"], "variants": ["default"] },
+    { "name": "NavigableToolbar", "charm_base": "lipgloss.JoinHorizontal + bubbles.key", "tokens_used": ["butterscotch", "moonlit_violet", "galaxy_gray", "space_white"], "variants": ["default", "navigating"] }
+  ],
+  "data_sources": [
+    { "source": "ship_state", "description": "Ship ID, name, class, status, directive, crew" },
+    { "source": "agent_states", "description": "Crew members with role, status, mission, phase" },
+    { "source": "mission_states", "description": "All missions for this ship" },
+    { "source": "ac_phases", "description": "Per-AC TDD phase state" },
+    { "source": "gate_evidence", "description": "Gate results for ship's missions" },
+    { "source": "wave_progress", "description": "Wave assignments and completion" },
+    { "source": "event_stream", "description": "Events scoped to this ship" }
+  ],
+  "keyboard": {
+    "global": { "Tab": "Cycle: crew -> missions -> events -> toolbar", "Shift+Tab": "Reverse", "?": "Help", "q": "Quit" },
+    "view_specific": { "Enter": "Drill into agent or mission", "Escape": "Fleet Overview", "p": "Ready Room (DOCKED)", "l": "Launch (DOCKED+approved)", "a": "Assign crew (DOCKED)", "h": "Halt (LAUNCHED)", "r": "Retry (LAUNCHED)", "w": "Wave manager (LAUNCHED)", "d": "Dock (LAUNCHED)", "Space": "Pause/resume" },
+    "toolbar_buttons_docked": [
+      { "key": "p", "label": "Plan", "action": "Open Ready Room" },
+      { "key": "a", "label": "Assign", "action": "Assign crew" },
+      { "key": "l", "label": "Launch", "action": "Launch ship" },
+      { "key": "w", "label": "Wave", "action": "Wave manager" },
+      { "key": "?", "label": "Help", "action": "Help overlay" },
+      { "key": "Esc", "label": "Fleet", "action": "Fleet Overview" }
+    ],
+    "toolbar_buttons_launched": [
+      { "key": "h", "label": "Halt", "action": "Halt mission" },
+      { "key": "r", "label": "Retry", "action": "Retry mission" },
+      { "key": "w", "label": "Wave", "action": "Wave manager" },
+      { "key": "d", "label": "Dock", "action": "Dock ship" },
+      { "key": "?", "label": "Help", "action": "Help overlay" },
+      { "key": "Esc", "label": "Fleet", "action": "Fleet Overview" }
+    ]
+  },
+  "transitions": [
+    { "to": "fleet-overview", "trigger": "Escape", "type": "pop", "animation": { "preset": "view_switch", "direction": "slide-left" } },
+    { "to": "ready-room", "trigger": "Press 'p'", "type": "push", "animation": { "preset": "view_switch", "direction": "slide-right" } },
+    { "to": "agent-detail", "trigger": "Enter on agent", "type": "push", "animation": { "preset": "view_switch", "direction": "slide-right" } },
+    { "to": "mission-detail", "trigger": "Enter on mission", "type": "push", "animation": { "preset": "view_switch", "direction": "slide-right" } },
+    { "to": "wave-manager", "trigger": "Press 'w'", "type": "overlay_open", "animation": { "preset": "modal_open" } }
+  ],
+  "special_behavior": [
+    { "trigger": "DOCKED, no directive", "behavior": "Mission board: 'Assign a directive. Press [d] from Fleet Overview.'" },
+    { "trigger": "DOCKED, plan approved", "behavior": "'Plan approved. Press [l] to engage.' butterscotch animation." },
+    { "trigger": "LAUNCHED, crew question", "behavior": "Admiral Question modal overlays immediately." },
+    { "trigger": "All missions complete", "behavior": "COMPLETE status, green_ok celebration animation." }
+  ],
+  "tokens": {
+    "colors": { "primary": "butterscotch", "accent": "blue", "header_title": "butterscotch" },
+    "borders": { "default": "lipgloss.RoundedBorder() in blue", "focused": "lipgloss.RoundedBorder() in moonlit_violet" },
+    "icons": { "running": "\u25B8", "done": "\u2713", "stuck": "\u26A0", "dead": "\u2717", "idle": "\u23F8" }
+  }
+}

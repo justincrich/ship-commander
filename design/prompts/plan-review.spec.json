@@ -1,0 +1,74 @@
+{
+  "design_key": "plan-review",
+  "name": "Plan Review",
+  "version": "2.0",
+  "description": "Full-screen drill-down for reviewing mission manifest, coverage matrix, and dependency graph. Promoted from overlay to own view. Admiral approves, provides feedback, or shelves here.",
+  "screen": {
+    "type": "drill-down",
+    "parent": "ready-room",
+    "children": [],
+    "mode_availability": { "basic": true, "advanced": true, "executive": false },
+    "mode_differences": {
+      "basic": ["Dependency graph section hidden", "Mission list shows title + classification only (no AC detail)", "Inline explanation of approve/feedback/shelve options"],
+      "advanced": ["Full mission detail with AC counts, surface areas, use-case refs", "Dependency graph and full coverage breakdown visible"]
+    }
+  },
+  "layout": {
+    "structure": "PlanReviewHeader | ManifestViewport (50%) + AnalysisPanel (50%) | NavigableToolbar",
+    "rows": [
+      { "name": "header", "height": 3, "panels": [
+        { "id": "plan-review-header", "width": "100%", "description": "Row 1: 'PLAN REVIEW -- <Ship Name>' in bold butterscotch. Directive title. Row 2: Summary stats: mission count, wave count, coverage percentage, sign-off status (N/M crew signed off)." }
+      ]},
+      { "name": "content", "height": "fill", "panels": [
+        { "id": "manifest-viewport", "width": "50%", "description": "Scrollable Glamour-rendered mission manifest. Each mission: sequence number, title, classification badge, wave, use-case refs, AC count, surface area. Separated by horizontal rules." },
+        { "id": "analysis-panel", "width": "50%", "description": "Vertically stacked: Top half: Coverage matrix -- use-case coverage from directive. Icons: checkmark (covered), warning (partial), cross (uncovered). Bottom half: Dependency graph -- ASCII tree with wave groupings and mission relationships." }
+      ]},
+      { "name": "toolbar", "height": 1, "panels": [
+        { "id": "navigable-toolbar", "width": "100%", "description": "NavigableToolbar: [a] Approve  [f] Feedback  [s] Shelve  [?] Help  [Esc] Ready Room. When 'Feedback' selected, huh.Text multi-line input expands inline above toolbar." }
+      ]}
+    ],
+    "responsive": {
+      "standard": { "min_width": 120, "description": "Two-column: manifest + analysis side by side" },
+      "compact": { "threshold": "<120 cols", "description": "Stacked layout: manifest on top, analysis below as tabbed panels" }
+    }
+  },
+  "components": [
+    { "name": "PlanReviewHeader", "charm_base": "lipgloss.JoinHorizontal + lipgloss.NewStyle()", "tokens_used": ["butterscotch", "blue", "green_ok", "space_white", "light_gray"], "variants": [] },
+    { "name": "Viewport", "charm_base": "bubbles.viewport + glamour.Render", "tokens_used": ["butterscotch", "blue", "purple", "space_white", "light_gray"], "variants": ["manifest"] },
+    { "name": "CoverageMatrix", "charm_base": "bubbles.table", "tokens_used": ["green_ok", "yellow_caution", "red_alert", "space_white", "light_gray", "blue"], "variants": ["full", "gaps_only"] },
+    { "name": "DependencyGraph", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["blue", "butterscotch", "purple", "green_ok", "galaxy_gray", "space_white"], "variants": ["default", "compact"] },
+    { "name": "PlanApprovalForm", "charm_base": "huh.Form (huh.Select + huh.Text)", "tokens_used": ["gold", "butterscotch", "green_ok", "red_alert", "space_white", "purple"], "variants": ["first_review", "revision", "final"] },
+    { "name": "NavigableToolbar", "charm_base": "lipgloss.JoinHorizontal + bubbles.key", "tokens_used": ["butterscotch", "moonlit_violet", "galaxy_gray", "space_white"], "variants": ["default", "navigating"] }
+  ],
+  "data_sources": [
+    { "source": "mission_manifest", "description": "Complete mission list with classifications, waves, ACs" },
+    { "source": "use_case_coverage", "description": "Per-use-case coverage mapping to missions" },
+    { "source": "dependency_graph", "description": "Mission dependencies and wave groupings" },
+    { "source": "crew_signoffs", "description": "Sign-off status per crew member" }
+  ],
+  "keyboard": {
+    "global": { "Tab": "Cycle focus: manifest -> analysis-panel -> navigable-toolbar", "Shift+Tab": "Reverse focus cycle", "?": "Help", "q": "Quit" },
+    "view_specific": { "Up/Down": "Scroll manifest or navigate analysis", "Enter": "Activate highlighted toolbar button", "Escape": "Return to Ready Room", "a": "Approve plan", "f": "Provide feedback (opens inline text input)", "s": "Shelve plan" },
+    "toolbar_buttons": [
+      { "key": "a", "label": "Approve", "action": "Approve plan and launch" },
+      { "key": "f", "label": "Feedback", "action": "Provide feedback (reconvene)" },
+      { "key": "s", "label": "Shelve", "action": "Shelve plan for later" },
+      { "key": "?", "label": "Help", "action": "Help overlay" },
+      { "key": "Esc", "label": "Ready Room", "action": "Return to Ready Room" }
+    ]
+  },
+  "transitions": [
+    { "to": "ready-room", "trigger": "Escape or 'Feedback' selected", "type": "pop", "animation": { "preset": "view_switch", "direction": "slide-left" } },
+    { "to": "ship-bridge", "trigger": "Approve selected", "type": "pop_to", "animation": { "preset": "warp_engage", "description": "Full warp jump effect. Star-streak characters race across viewport. Navigation stack pops to Ship Bridge." } }
+  ],
+  "special_behavior": [
+    { "trigger": "Full coverage (100%)", "behavior": "Coverage matrix header shows green_ok badge. Approve button highlighted." },
+    { "trigger": "Coverage gaps exist", "behavior": "Coverage matrix highlights uncovered use cases in red_alert. Warning badge next to coverage percentage." },
+    { "trigger": "Final iteration reached", "behavior": "Feedback option disabled. Only Approve or Shelve available. Iteration badge shows red_alert." }
+  ],
+  "tokens": {
+    "colors": { "primary": "butterscotch", "accent": "blue" },
+    "borders": { "default": "lipgloss.RoundedBorder() in blue", "focused": "lipgloss.RoundedBorder() in moonlit_violet" },
+    "icons": { "covered": "\u2713", "partial": "\u26A0", "uncovered": "\u2717" }
+  }
+}

@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Specialist Detail - Ship Commander TUI</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #1a1a2e;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .terminal-window {
+            max-width: 1100px;
+            width: 100%;
+            border-radius: 8px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+        }
+
+        .title-bar {
+            background: #2D2D2D;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .window-controls {
+            display: flex;
+            gap: 8px;
+        }
+
+        .window-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .window-dot.red { background: #FF5F56; }
+        .window-dot.yellow { background: #FFBD2E; }
+        .window-dot.green { background: #27C93F; }
+
+        .window-title {
+            flex: 1;
+            text-align: center;
+            color: #F5F6FA;
+            font-size: 13px;
+            margin-right: 44px;
+        }
+
+        .terminal-body {
+            background: #000000;
+            color: #F5F6FA;
+            font-size: 13px;
+            line-height: 1.4;
+            padding: 16px;
+            border-radius: 0 0 8px 8px;
+        }
+
+        /* Agent Profile Header */
+        .agent-profile {
+            margin-bottom: 16px;
+        }
+
+        .profile-line {
+            margin-bottom: 4px;
+        }
+
+        .agent-name {
+            color: #FF9966;
+            font-weight: bold;
+        }
+
+        .role-badge {
+            background: #CC99CC;
+            color: #000000;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-weight: bold;
+            margin-left: 8px;
+        }
+
+        .ship-name {
+            color: #9999CC;
+        }
+
+        .specialty {
+            color: #CCCCCC;
+        }
+
+        .status-badge {
+            color: #FF9966;
+        }
+
+        .elapsed {
+            color: #FFAA90;
+        }
+
+        .dim {
+            color: #52526A;
+        }
+
+        /* Output Viewport */
+        .output-viewport {
+            border: 1px solid #9999CC;
+            border-radius: 6px;
+            padding: 12px;
+            height: 420px;
+            overflow-y: auto;
+            margin-bottom: 16px;
+            position: relative;
+        }
+
+        .viewport-title {
+            color: #FF9966;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .output-line {
+            margin-bottom: 4px;
+            display: flex;
+        }
+
+        .line-number {
+            color: #52526A;
+            min-width: 40px;
+            user-select: none;
+        }
+
+        .line-content {
+            flex: 1;
+        }
+
+        .output-section-header {
+            color: #9999CC;
+            font-weight: bold;
+            margin-top: 12px;
+            margin-bottom: 4px;
+        }
+
+        .output-bullet {
+            color: #FF9966;
+        }
+
+        .output-highlight {
+            color: #FFAA00;
+        }
+
+        /* Signoff Status Panel */
+        .signoff-panel {
+            border: 1px solid #9999CC;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 16px;
+            min-height: 90px;
+        }
+
+        .signoff-title {
+            color: #FF9966;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .signoff-list {
+            margin-left: 16px;
+        }
+
+        .signoff-item {
+            margin-bottom: 4px;
+        }
+
+        .signoff-approved {
+            color: #33FF33;
+        }
+
+        .signoff-pending {
+            color: #52526A;
+        }
+
+        .signoff-name {
+            color: #F5F6FA;
+        }
+
+        /* Navigable Toolbar */
+        .navigable-toolbar {
+            border-top: 1px solid #52526A;
+            padding-top: 8px;
+            display: flex;
+            gap: 16px;
+        }
+
+        .toolbar-item {
+            color: #CCCCCC;
+        }
+
+        .toolbar-key {
+            color: #FF9966;
+            font-weight: bold;
+        }
+
+        /* Scrollbar styling */
+        .output-viewport::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .output-viewport::-webkit-scrollbar-track {
+            background: #1B4F8F;
+            border-radius: 4px;
+        }
+
+        .output-viewport::-webkit-scrollbar-thumb {
+            background: #9999CC;
+            border-radius: 4px;
+        }
+
+        .output-viewport::-webkit-scrollbar-thumb:hover {
+            background: #9966FF;
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal-window">
+        <div class="title-bar">
+            <div class="window-controls">
+                <div class="window-dot red"></div>
+                <div class="window-dot yellow"></div>
+                <div class="window-dot green"></div>
+            </div>
+            <div class="window-title">Ship Commander - Specialist Detail</div>
+        </div>
+
+        <div class="terminal-body">
+            <!-- Agent Profile Header -->
+            <div class="agent-profile">
+                <div class="profile-line">
+                    <span class="agent-name">Lt. Cmdr. La Forge</span>
+                    <span class="role-badge">SPECIALIST</span>
+                    <span class="dim"> │ </span>
+                    <span class="ship-name">USS Enterprise</span>
+                </div>
+                <div class="profile-line">
+                    <span class="dim">Specialty:</span> <span class="specialty">Backend Architecture</span>
+                    <span class="dim"> │ Harness:</span> <span class="specialty">claude-code</span>
+                    <span class="dim"> │ Model:</span> <span class="specialty">sonnet-4.5</span>
+                </div>
+                <div class="profile-line">
+                    <span class="status-badge">▸ PLANNING</span>
+                    <span class="dim"> │ Directive:</span> <span class="specialty">Build terminal UI for Ready Room</span>
+                    <span class="dim"> │ Iteration:</span> <span class="specialty">2</span>
+                </div>
+                <div class="profile-line">
+                    <span class="dim">Elapsed:</span> <span class="elapsed">08m 12s</span>
+                </div>
+            </div>
+
+            <!-- Output Viewport -->
+            <div class="output-viewport">
+                <div class="viewport-title">╭─ PLANNING OUTPUT ─╮</div>
+
+                <div class="output-line">
+                    <span class="line-number">  1</span>
+                    <span class="line-content"><span class="output-section-header">═══ MISSION DECOMPOSITION ANALYSIS ═══</span></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">  2</span>
+                    <span class="line-content"></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">  3</span>
+                    <span class="line-content"><span class="output-highlight">Directive:</span> Build terminal UI for Ready Room (iteration 2)</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">  4</span>
+                    <span class="line-content"><span class="dim">Status:</span> Analyzing surface area and defining acceptance criteria</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">  5</span>
+                    <span class="line-content"></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">  6</span>
+                    <span class="line-content"><span class="output-section-header">─── Surface Area Analysis ───</span></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">  7</span>
+                    <span class="line-content"></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">  8</span>
+                    <span class="line-content"><span class="output-bullet">●</span> Core Components Required:</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">  9</span>
+                    <span class="line-content">  <span class="dim">→</span> AgentProfileCard (4x components for Captain, Commander, Design Officer, Specialist)</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 10</span>
+                    <span class="line-content">  <span class="dim">→</span> DirectivePanel (displays current mission context)</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 11</span>
+                    <span class="line-content">  <span class="dim">→</span> IterationTracker (shows planning cycle progress)</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 12</span>
+                    <span class="line-content">  <span class="dim">→</span> NavigableToolbar (keyboard navigation and actions)</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 13</span>
+                    <span class="line-content"></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 14</span>
+                    <span class="line-content"><span class="output-bullet">●</span> Backend Integration Points:</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 15</span>
+                    <span class="line-content">  <span class="dim">→</span> Agent state management (status, harness, model, elapsed time)</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 16</span>
+                    <span class="line-content">  <span class="dim">→</span> Real-time updates via observer pattern or event channels</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 17</span>
+                    <span class="line-content">  <span class="dim">→</span> Keyboard event handling and focus management</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 18</span>
+                    <span class="line-content">  <span class="dim">→</span> Navigation state transitions (drill-down to specialist detail)</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 19</span>
+                    <span class="line-content"></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 20</span>
+                    <span class="line-content"><span class="output-bullet">●</span> Data Flow Architecture:</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 21</span>
+                    <span class="line-content">  <span class="dim">→</span> Central state store for agent instances</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 22</span>
+                    <span class="line-content">  <span class="dim">→</span> Component subscriptions to relevant state slices</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 23</span>
+                    <span class="line-content">  <span class="dim">→</span> Unidirectional data flow (state → view → user action → state update)</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 24</span>
+                    <span class="line-content"></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 25</span>
+                    <span class="line-content"><span class="output-section-header">─── Proposed Mission Breakdown ───</span></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 26</span>
+                    <span class="line-content"></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 27</span>
+                    <span class="line-content"><span class="output-highlight">Mission 1:</span> Implement AgentProfileCard Component</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 28</span>
+                    <span class="line-content">  <span class="dim">AC1:</span> Component renders agent name in butterscotch color with bold weight</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 29</span>
+                    <span class="line-content">  <span class="dim">AC2:</span> Role badge displays with correct color mapping (Captain=gold, Commander=blue, etc.)</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 30</span>
+                    <span class="line-content">  <span class="dim">AC3:</span> Status indicator shows current agent state with appropriate icon (● ✓ ⏸ ✗)</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 31</span>
+                    <span class="line-content">  <span class="dim">AC4:</span> Harness and model information displayed in light gray</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 32</span>
+                    <span class="line-content">  <span class="dim">AC5:</span> Elapsed timer updates in real-time with warning color after 15 minutes</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 33</span>
+                    <span class="line-content">  <span class="dim">AC6:</span> Component responds to keyboard focus with moonlit_violet border</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 34</span>
+                    <span class="line-content">  <span class="dim">AC7:</span> Pressing Enter on focused card triggers drill-down to specialist detail</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 35</span>
+                    <span class="line-content"></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 36</span>
+                    <span class="line-content"><span class="output-highlight">Mission 2:</span> Implement DirectivePanel Component</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 37</span>
+                    <span class="line-content">  <span class="dim">AC1:</span> Panel displays current directive text in space_white</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 38</span>
+                    <span class="line-content">  <span class="dim">AC2:</span> Iteration number shown with appropriate styling</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 39</span>
+                    <span class="line-content">  <span class="dim">AC3:</span> Panel has rounded border in blue (LCARS style)</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 40</span>
+                    <span class="line-content">  <span class="dim">AC4:</span> Text wraps appropriately for terminal width (120 cols max)</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 41</span>
+                    <span class="line-content"></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 42</span>
+                    <span class="line-content"><span class="output-highlight">Mission 3:</span> Implement State Management and Real-time Updates</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 43</span>
+                    <span class="line-content">  <span class="dim">AC1:</span> State store holds all agent instances with their current status</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 44</span>
+                    <span class="line-content">  <span class="dim">AC2:</span> Components subscribe to state changes and re-render automatically</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 45</span>
+                    <span class="line-content">  <span class="dim">AC3:</span> Elapsed timers increment every second for active agents</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 46</span>
+                    <span class="line-content">  <span class="dim">AC4:</span> Status badge updates within 100ms of agent state change</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 47</span>
+                    <span class="line-content"></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 48</span>
+                    <span class="line-content"><span class="output-section-header">─── Questions for Command ───</span></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 49</span>
+                    <span class="line-content"></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 50</span>
+                    <span class="line-content"><span class="dim">Q1:</span> Should we implement keyboard shortcuts for direct navigation (1-4 for each agent)?</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 51</span>
+                    <span class="line-content"><span class="dim">Q2:</span> What should happen if an agent fails? Show error state in Ready Room or auto-hide?</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 52</span>
+                    <span class="line-content"><span class="dim">Q3:</span> Should elapsed time warning threshold be configurable per agent role?</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 53</span>
+                    <span class="line-content"><span class="dim">Q4:</span> Do we need animation/transition effects when agents change status?</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 54</span>
+                    <span class="line-content"></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 55</span>
+                    <span class="line-content"><span class="output-section-header">─── Next Steps ───</span></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 56</span>
+                    <span class="line-content"></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 57</span>
+                    <span class="line-content"><span class="dim">1.</span> Await sign-off from Captain and Commander on proposed missions</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 58</span>
+                    <span class="line-content"><span class="dim">2.</span> Clarify open questions with Design Officer</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 59</span>
+                    <span class="line-content"><span class="dim">3.</span> Begin implementation of Mission 1 (AgentProfileCard)</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number"> 60</span>
+                    <span class="line-content"><span class="dim">4.</span> Set up component testing harness for TUI validation</span>
+                </div>
+            </div>
+
+            <!-- Signoff Status Panel -->
+            <div class="signoff-panel">
+                <div class="signoff-title">╭─ SIGN-OFF STATUS ─╮</div>
+                <div class="signoff-list">
+                    <div class="signoff-item">
+                        <span class="signoff-approved">✓</span> <span class="signoff-name">Capt. Picard</span> <span class="dim">(approved)</span>
+                    </div>
+                    <div class="signoff-item">
+                        <span class="signoff-approved">✓</span> <span class="signoff-name">Cmdr. Riker</span> <span class="dim">(approved)</span>
+                    </div>
+                    <div class="signoff-item">
+                        <span class="signoff-pending">○</span> <span class="signoff-name">Lt. Troi</span> <span class="dim">(pending)</span>
+                    </div>
+                    <div class="signoff-item">
+                        <span class="signoff-pending">○</span> <span class="signoff-name">Ens. Crusher</span> <span class="dim">(pending)</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Navigable Toolbar -->
+            <div class="navigable-toolbar">
+                <span class="toolbar-item"><span class="toolbar-key">[?]</span> Help</span>
+                <span class="toolbar-item"><span class="toolbar-key">[Esc]</span> Ready Room</span>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

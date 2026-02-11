@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Detail - Cmdr. Data</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #1a1a2e;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .terminal-window {
+            max-width: 1100px;
+            width: 100%;
+            border-radius: 8px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+            overflow: hidden;
+        }
+
+        .title-bar {
+            background: #2D2D2D;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .window-controls {
+            display: flex;
+            gap: 8px;
+        }
+
+        .window-control {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .window-control.close { background: #FF5F56; }
+        .window-control.minimize { background: #FFBD2E; }
+        .window-control.maximize { background: #27C93F; }
+
+        .window-title {
+            flex: 1;
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+            margin-right: 44px;
+        }
+
+        .terminal-body {
+            background: #000000;
+            color: #F5F6FA;
+            font-size: 13px;
+            line-height: 1.4;
+            padding: 16px;
+            border-radius: 0 0 8px 8px;
+            height: 700px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .agent-profile-header {
+            padding: 8px 12px;
+            border: 1px solid #9999CC;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            background: rgba(153, 153, 204, 0.05);
+        }
+
+        .profile-row-1 {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 4px;
+        }
+
+        .agent-name {
+            font-weight: bold;
+            color: #FF9966;
+            font-size: 15px;
+        }
+
+        .role-badge {
+            background: #9999CC;
+            color: #000000;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        .ship-info {
+            color: #CCCCCC;
+            font-size: 11px;
+        }
+
+        .harness-model {
+            color: #9999CC;
+            font-size: 11px;
+        }
+
+        .mission-id {
+            color: #FFAA00;
+            font-size: 11px;
+        }
+
+        .phase-indicator {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+        }
+
+        .phase-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .phase-dot.red { background: #FF3333; }
+        .phase-dot.yellow { background: #FFCC00; }
+        .phase-dot.green { background: #33FF33; }
+        .phase-dot.inactive { background: #52526A; }
+
+        .elapsed-timer {
+            color: #CCCCCC;
+            font-size: 11px;
+        }
+
+        .status-badge {
+            color: #33FF33;
+            font-size: 11px;
+        }
+
+        .profile-row-2 {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: #CCCCCC;
+            font-size: 11px;
+            margin-bottom: 4px;
+        }
+
+        .profile-row-3 {
+            color: #52526A;
+            font-size: 11px;
+            font-style: italic;
+        }
+
+        .output-viewport {
+            flex: 1;
+            background: #000000;
+            border: 1px solid #52526A;
+            border-radius: 4px;
+            padding: 8px;
+            overflow-y: auto;
+            margin-bottom: 12px;
+            font-size: 12px;
+        }
+
+        .output-line {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 2px;
+        }
+
+        .line-number {
+            color: #52526A;
+            min-width: 40px;
+            text-align: right;
+            user-select: none;
+        }
+
+        .line-content {
+            color: #F5F6FA;
+            flex: 1;
+        }
+
+        .line-content.success {
+            color: #33FF33;
+        }
+
+        .line-content.error {
+            color: #FF3333;
+        }
+
+        .line-content.warning {
+            color: #FFCC00;
+        }
+
+        .line-content.info {
+            color: #9999CC;
+        }
+
+        .line-content.dim {
+            color: #52526A;
+        }
+
+        .keyword {
+            color: #9966FF;
+        }
+
+        .string {
+            color: #FF99CC;
+        }
+
+        .number {
+            color: #99CCFF;
+        }
+
+        .error-context {
+            border: 2px solid #FF3333;
+            border-radius: 4px;
+            padding: 8px 12px;
+            margin-bottom: 12px;
+            background: rgba(255, 51, 51, 0.1);
+        }
+
+        .error-header {
+            color: #FF3333;
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+
+        .error-details {
+            color: #CCCCCC;
+            font-size: 11px;
+            line-height: 1.6;
+        }
+
+        .error-detail-line {
+            margin-bottom: 2px;
+        }
+
+        .error-label {
+            color: #FF9966;
+            display: inline-block;
+            width: 120px;
+        }
+
+        .navigable-toolbar {
+            display: flex;
+            gap: 16px;
+            padding: 8px 12px;
+            background: rgba(153, 153, 204, 0.1);
+            border: 1px solid #52526A;
+            border-radius: 4px;
+        }
+
+        .toolbar-button {
+            color: #9966FF;
+            font-size: 12px;
+        }
+
+        .toolbar-key {
+            color: #FF9966;
+            font-weight: bold;
+        }
+
+        /* Scrollbar styling */
+        .output-viewport::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .output-viewport::-webkit-scrollbar-track {
+            background: #000000;
+        }
+
+        .output-viewport::-webkit-scrollbar-thumb {
+            background: #52526A;
+            border-radius: 4px;
+        }
+
+        .output-viewport::-webkit-scrollbar-thumb:hover {
+            background: #9999CC;
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal-window">
+        <div class="title-bar">
+            <div class="window-controls">
+                <div class="window-control close"></div>
+                <div class="window-control minimize"></div>
+                <div class="window-control maximize"></div>
+            </div>
+            <div class="window-title">ship-commander-3 — Agent Detail</div>
+        </div>
+        <div class="terminal-body">
+            <!-- Agent Profile Header -->
+            <div class="agent-profile-header">
+                <div class="profile-row-1">
+                    <span class="agent-name">Cmdr. Data</span>
+                    <span class="role-badge">COMMANDER</span>
+                    <span class="ship-info">USS Enterprise</span>
+                    <span class="harness-model">claude-code</span>
+                    <span class="harness-model">sonnet-4</span>
+                    <span class="mission-id">M-005</span>
+                </div>
+                <div class="profile-row-2">
+                    <div class="phase-indicator">
+                        <span style="color: #CCCCCC;">TDD:</span>
+                        <span class="phase-dot red"></span>
+                        <span class="phase-dot yellow"></span>
+                        <span class="phase-dot green"></span>
+                        <span class="phase-dot yellow"></span>
+                        <span class="phase-dot inactive"></span>
+                        <span class="phase-dot inactive"></span>
+                        <span style="color: #FFCC00; margin-left: 4px;">VERIFY_GREEN</span>
+                    </div>
+                    <span class="elapsed-timer">⏱ 12m 34s</span>
+                    <span class="status-badge">▸ RUNNING</span>
+                </div>
+                <div class="profile-row-3">
+                    Mission: "Implement user authentication with JWT tokens and rate limiting..."
+                </div>
+            </div>
+
+            <!-- Output Viewport -->
+            <div class="output-viewport">
+                <div class="output-line">
+                    <span class="line-number">1</span>
+                    <span class="line-content dim">╭─────────────────────────────────────────────────────╮</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">2</span>
+                    <span class="line-content dim">│ <span style="color: #FF9966;">VERIFY_GREEN Gate Execution</span>                     │</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">3</span>
+                    <span class="line-content dim">╰─────────────────────────────────────────────────────╯</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">4</span>
+                    <span class="line-content">&nbsp;</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">5</span>
+                    <span class="line-content info">[14:27:48] Running test suite...</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">6</span>
+                    <span class="line-content">&nbsp;</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">7</span>
+                    <span class="line-content">$ npm test -- auth.test.js</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">8</span>
+                    <span class="line-content">&nbsp;</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">9</span>
+                    <span class="line-content success">  ✓ should generate valid JWT token</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">10</span>
+                    <span class="line-content success">  ✓ should validate token signature</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">11</span>
+                    <span class="line-content error">  ✗ should enforce rate limiting after 100 requests</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">12</span>
+                    <span class="line-content">&nbsp;</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">13</span>
+                    <span class="line-content error">  AssertionError: expected 3 passing, got 2</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">14</span>
+                    <span class="line-content dim">      at Context.&lt;anonymous&gt; (test/auth.test.js:45:12)</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">15</span>
+                    <span class="line-content dim">      at processImmediate (node:internal/timers:478:21)</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">16</span>
+                    <span class="line-content">&nbsp;</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">17</span>
+                    <span class="line-content error">  2 passing (1.2s)</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">18</span>
+                    <span class="line-content error">  1 failing</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">19</span>
+                    <span class="line-content">&nbsp;</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">20</span>
+                    <span class="line-content warning">[14:28:05] Test suite failed with exit code 1</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">21</span>
+                    <span class="line-content">&nbsp;</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">22</span>
+                    <span class="line-content info">[14:28:05] Analyzing test failure...</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">23</span>
+                    <span class="line-content">&nbsp;</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">24</span>
+                    <span class="line-content">Reading file: <span class="string">src/middleware/rateLimit.js</span></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">25</span>
+                    <span class="line-content dim">  1: <span class="keyword">const</span> rateLimit = <span class="keyword">require</span>(<span class="string">'express-rate-limit'</span>);</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">26</span>
+                    <span class="line-content dim">  2: </span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">27</span>
+                    <span class="line-content dim">  3: <span class="keyword">module.exports</span> = rateLimit({</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">28</span>
+                    <span class="line-content dim">  4:   windowMs: <span class="number">15</span> * <span class="number">60</span> * <span class="number">1000</span>, <span class="dim">// 15 minutes</span></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">29</span>
+                    <span class="line-content dim">  5:   max: <span class="number">50</span>, <span style="color: #FF3333;">// ← Issue: Should be 100</span></span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">30</span>
+                    <span class="line-content dim">  6: });</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">31</span>
+                    <span class="line-content">&nbsp;</span>
+                </div>
+                <div class="output-line">
+                    <span class="line-number">32</span>
+                    <span class="line-content warning">[14:28:12] Timeout exceeded (180s). Stuck detection triggered.</span>
+                </div>
+            </div>
+
+            <!-- Error Context Panel -->
+            <div class="error-context">
+                <div class="error-header">⚠ STUCK DETECTED</div>
+                <div class="error-details">
+                    <div class="error-detail-line">
+                        <span class="error-label">Timestamp:</span>14:28:05
+                    </div>
+                    <div class="error-detail-line">
+                        <span class="error-label">Last gate:</span>VERIFY_GREEN failed (exit 1)
+                    </div>
+                    <div class="error-detail-line">
+                        <span class="error-label">Timeout:</span>180s exceeded
+                    </div>
+                    <div class="error-detail-line">
+                        <span class="error-label">Last output:</span>"Error: expected 3 assertions, got 2"
+                    </div>
+                </div>
+            </div>
+
+            <!-- Navigable Toolbar -->
+            <div class="navigable-toolbar">
+                <span class="toolbar-button"><span class="toolbar-key">[h]</span> Halt</span>
+                <span class="toolbar-button"><span class="toolbar-key">[r]</span> Retry</span>
+                <span class="toolbar-button"><span class="toolbar-key">[i]</span> Ignore</span>
+                <span class="toolbar-button"><span class="toolbar-key">[?]</span> Help</span>
+                <span class="toolbar-button"><span class="toolbar-key">[Esc]</span> Back</span>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

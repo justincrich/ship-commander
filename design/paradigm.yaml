@@ -1,0 +1,598 @@
+# =============================================================================
+# Ship Commander 3 -- Design Paradigm
+# =============================================================================
+# Design patterns, principles, and references for the Charm-LCARS TUI.
+# All components built exclusively with Charmbracelet libraries in Go.
+# =============================================================================
+
+design_system:
+  name: "Charm-LCARS"
+  version: "1.0.0"
+  description: >
+    A fusion of Charmbracelet's playful, glamorous terminal aesthetic with
+    Star Trek LCARS thematic elements. The Charm side brings clean Lipgloss
+    styling, smart responsive layouts, immutable style composition, rounded
+    borders, and a "fun but productive" energy. The LCARS side brings the
+    orange/blue/purple/pink semantic color palette, panel borders, Star Trek
+    terminology (commissions, missions, waves, gates), and the feeling of
+    commanding a starship bridge. The result is a polished Charm CLI tool
+    themed as a starship command console -- glamorous agentic coding meets
+    Starfleet.
+
+# -----------------------------------------------------------------------------
+# Principles
+# -----------------------------------------------------------------------------
+
+principles:
+  - id: deterministic-vs-probabilistic
+    name: "Deterministic gets solid, probabilistic gets dashed"
+    description: >
+      Deterministic decisions (gate results, state transitions, boolean logic)
+      are rendered with solid borders and concrete symbols. Probabilistic
+      output from AI agents is rendered with dashed or faint styling to
+      signal that the content is generated and may require human validation.
+
+  - id: color-plus-symbol
+    name: "Color + symbol, never color alone"
+    description: >
+      Every status communicated through color must also carry a distinct
+      Unicode symbol (checkmark, cross, warning triangle, etc.) so that
+      color-blind operators can read the interface without loss of meaning.
+
+  - id: lipgloss-composition
+    name: "Lipgloss immutable styles compose via inheritance"
+    description: >
+      All styles are defined as immutable lipgloss.Style values. Child styles
+      inherit from parent styles via .Inherit(). Never mutate a style in
+      place; always derive a new style. This mirrors the Charmbracelet
+      convention of functional style composition.
+
+  - id: smart-main-dumb-components
+    name: "Smart main model, dumb view components"
+    description: >
+      The root tea.Model (MainModel) owns all state, subscribes to the event
+      bus, and routes messages. View components (panels, cards, indicators)
+      are pure rendering functions that receive data and return strings. They
+      never hold state or send commands. This follows Bubble Tea's Elm
+      architecture and the pattern seen in Charmbracelet's Crush.
+
+  - id: progressive-disclosure
+    name: "Overview first, details on demand"
+    description: >
+      The default view shows high-level status for all active work. Drill
+      down via Enter to see progressively more detail (mission -> AC -> gate
+      result -> agent output). Three display modes (basic, advanced,
+      executive) control how much is visible by default. Information density
+      increases only when the operator requests it.
+
+  - id: keyboard-sovereign
+    name: "Keyboard is sovereign, mouse is optional"
+    description: >
+      Every action in the TUI must be reachable via keyboard shortcut.
+      Mouse support may be added for convenience but is never required.
+      Panel focus, list navigation, drill-down, modal interaction, and
+      command input are all keyboard-driven. Shortcut hints are always
+      visible in the active panel footer or help bar.
+
+  - id: spatial-consistency
+    name: "Fixed panel positions for muscle memory"
+    description: >
+      Panels occupy the same spatial position across sessions. The operator
+      builds muscle memory for where Mission Control, Mission Board,
+      Tactical Display, Engineering Logs, and Command Interface live.
+      Panels resize responsively but never rearrange.
+
+  - id: terminal-first
+    name: "Design for the terminal, not against it"
+    description: >
+      Embrace terminal constraints as features. Monospace text is a layout
+      grid. Box-drawing characters are first-class borders. TrueColor is
+      available but ANSI 256-color fallback is always defined via Lipgloss
+      AdaptiveColor. The TUI should feel native to the terminal, not like
+      a web app crammed into a text grid.
+
+# -----------------------------------------------------------------------------
+# Patterns
+# -----------------------------------------------------------------------------
+
+patterns:
+
+  # -- Layout ----------------------------------------------------------------
+
+  layout:
+    architecture: "smart-main/dumb-components"
+    description: >
+      The root MainModel implements tea.Model with Init, Update, View.
+      It holds the focused panel index, navigation stack, modal stack,
+      and subscriptions to the event bus. Each view (FleetOverview,
+      ShipBridge, ReadyRoom, PlanReview, MissionDetail, FleetMonitor,
+      AgentRoster, DirectiveEditor, MessageCenter, etc.) is composed
+      of dumb render functions that receive data and return styled
+      strings. The MainModel composes views using lipgloss.JoinVertical
+      and lipgloss.JoinHorizontal. Every view ends with a NavigableToolbar
+      -- a bottom bar of shortcut buttons that are both pressable via
+      quick key and arrow-navigable + Enter-selectable.
+
+    composition:
+      horizontal: "lipgloss.JoinHorizontal(lipgloss.Top, left, right)"
+      vertical: "lipgloss.JoinVertical(lipgloss.Left, top, middle, bottom)"
+      example: >
+        header := renderShipHeader(m.ship, m.wave)
+        crew := renderCrewPanel(m.agents)
+        missions := renderMissionBoard(m.missions)
+        top := lipgloss.JoinHorizontal(lipgloss.Top, crew, missions)
+        logs := renderEventLog(m.events)
+        toolbar := renderNavigableToolbar(m.toolbarButtons, m.highlightedIdx)
+        return lipgloss.JoinVertical(lipgloss.Left, header, top, logs, toolbar)
+
+    breakpoints:
+      standard:
+        min_cols: 120
+        min_rows: 30
+        layout: "side-by-side panels, full log view, all detail visible"
+      compact:
+        trigger: "cols < 120 OR rows < 30"
+        layout: "vertical stacking, reduced log lines (4), truncated titles, hidden wave detail"
+      description: >
+        On each WindowSizeMsg the MainModel recalculates which layout to
+        use. In compact mode, Mission Control and Mission Board stack
+        vertically instead of side-by-side, log lines reduce from 8-12
+        to 4, and wave progress hides behind a [w] shortcut.
+
+  # -- Navigation ------------------------------------------------------------
+
+  navigation:
+    panel_cycling:
+      forward: "Tab"
+      backward: "Shift+Tab"
+      description: >
+        Tab cycles focus through panels in a fixed order. The focused
+        panel receives a highlighted border (moonlit_violet with
+        RoundedBorder). Non-focused panels show galaxy_gray NormalBorder.
+
+    drill_down:
+      enter: "Enter on selected item to drill into detail view"
+      escape: "Escape to pop back to previous view"
+
+    stack_based_history:
+      description: >
+        A navigation stack ([]string) tracks the path of drill-downs.
+        Escape pops the stack. When the stack is empty, Escape is a no-op
+        (does not quit the TUI). This allows arbitrary depth:
+        MainBridge -> MissionDetail -> ACDetail -> GateResult.
+
+    global_shortcuts:
+      quit: "q (with confirmation if work is in progress)"
+      help: "? (opens help overlay)"
+      force_quit: "Ctrl+C"
+
+    panel_shortcuts:
+      fleet_overview: "Esc (from ship-bridge)"
+      ship_bridge: "Enter (on ship in fleet)"
+      ready_room: "r (from ship-bridge)"
+      plan_review: "v (from ready-room)"
+      fleet_monitor: "f (from fleet-overview)"
+      agent_roster: "a (global)"
+      message_center: "i (global)"
+      wave_manager: "w (from ship-bridge)"
+    note: >
+      Panel shortcuts are now context-sensitive and displayed in the
+      NavigableToolbar at the bottom of each view. The toolbar buttons
+      are arrow-navigable (Left/Right) and Enter-selectable, or the
+      operator can press the quick key directly.
+
+  # -- Modals ----------------------------------------------------------------
+
+  modals:
+    pattern: "dialog-stack"
+    description: >
+      Modals are pushed onto a modal stack ([]Modal). The topmost modal
+      captures all input. Escape or a dismiss action pops the modal.
+      Modals render as a centered overlay with DoubleBorder and a
+      semi-transparent (Faint) background scrim effect on the content
+      beneath. Multiple modals can stack (e.g., confirmation on top of
+      question modal).
+
+    types:
+      - id: admiral_question
+        description: "Agent asks Admiral a question. Renders options as Huh Select or free text as Huh Text."
+        border: double
+        color: butterscotch
+        input: "Huh form (Select for options, Text for free-form, Confirm for yes/no)"
+
+      # NOTE: plan_review is now a full-screen drill-down view (not a modal).
+      # See views.yaml VIEW 7 (PlanReviewView).
+
+      - id: confirmation
+        description: "Simple yes/no confirmation for destructive actions (halt, retry, shelve)."
+        border: double
+        color: yellow_caution
+        input: "Huh Confirm"
+
+      - id: help_overlay
+        description: "Context-sensitive keyboard shortcut reference."
+        border: double
+        color: blue
+        input: "read-only, dismiss with Escape or ?"
+
+      - id: onboarding_tour
+        description: "First-run tour that highlights panels sequentially with explanatory text."
+        border: double
+        color: ice
+        input: "Enter to advance, Escape to skip"
+
+  # -- Forms -----------------------------------------------------------------
+
+  forms:
+    library: "github.com/charmbracelet/huh"
+    description: >
+      ALL human input flows through Huh forms. Huh forms implement
+      tea.Model natively and compose directly into the Bubble Tea update
+      loop. This ensures consistent keyboard interaction, validation, and
+      styling across every input surface.
+
+    components:
+      - type: Select
+        usage: "Admiral question with predefined options, mode selection, harness choice"
+      - type: Input
+        usage: "Single-line text input for command interface, directive IDs, search"
+      - type: Text
+        usage: "Multi-line text input for Admiral feedback, revision notes"
+      - type: Confirm
+        usage: "Yes/no decisions for approve, halt, retry, shelve"
+      - type: MultiSelect
+        usage: "Batch selection of missions for wave approval or bulk operations"
+
+    theme: "Custom Charm-LCARS theme derived from huh.ThemeCharm() with LCARS palette overrides"
+
+  # -- Animation -------------------------------------------------------------
+
+  animation:
+    library: "github.com/charmbracelet/harmonica"
+    description: >
+      Harmonica spring physics drive all animated transitions. Springs
+      are created with harmonica.NewSpring(timeDelta, angularFrequency,
+      dampingRatio) and ticked on each frame via tea.Tick. The spring
+      output (0.0 to 1.0) interpolates position, opacity, or size.
+
+    categories:
+      view_switch:
+        damping: "critically-damped (ratio = 1.0)"
+        feel: "Snappy, no overshoot. View content slides in crisply."
+        usage: "Switching between MainBridge, PlanningDashboard, WaveManager"
+
+      alert:
+        damping: "under-damped (ratio < 1.0)"
+        feel: "Bouncy, attention-grabbing oscillation."
+        usage: "Red alert border pulse, notification badge bounce, error shake"
+
+      progress:
+        damping: "over-damped (ratio > 1.0)"
+        feel: "Smooth, gradual approach with no bounce. Feels steady."
+        usage: "Progress bars, wave completion fill, smooth scrolling"
+
+      modal:
+        damping: "slightly under-damped for open (ratio = 0.8), critically-damped for close (ratio = 1.0)"
+        feel: "Open has a gentle bounce to draw attention, close is crisp."
+        usage: "Modal overlay entrance/exit, dialog stack push/pop"
+
+  # -- State Display ---------------------------------------------------------
+
+  state_display:
+    mission_board:
+      pattern: "kanban-columns"
+      columns:
+        - name: "Backlog"
+          key: "B"
+          color: blue
+        - name: "In Progress"
+          key: "IP"
+          color: butterscotch
+        - name: "Review"
+          key: "R"
+          color: purple
+        - name: "Done"
+          key: "D"
+          color: green_ok
+        - name: "Halted"
+          key: "H"
+          color: red_alert
+      description: >
+        The mission board renders as a compact summary line
+        (B:2 IP:3 R:1 D:5 H:0) in the panel header, with an expanded
+        Kanban view available via Enter. Each column shows missions
+        sorted by wave number and sequence.
+
+    tdd_phases:
+      pattern: "phase-indicator"
+      phases:
+        - name: "RED"
+          color: red_alert
+          icon: "R"
+          description: "Writing failing test"
+        - name: "VERIFY_RED"
+          color: red_alert
+          icon: "VR"
+          description: "Verifying test fails"
+        - name: "GREEN"
+          color: green_ok
+          icon: "G"
+          description: "Writing implementation to pass test"
+        - name: "VERIFY_GREEN"
+          color: green_ok
+          icon: "VG"
+          description: "Verifying test passes"
+        - name: "REFACTOR"
+          color: purple
+          icon: "RF"
+          description: "Cleaning up implementation"
+        - name: "VERIFY_REFACTOR"
+          color: purple
+          icon: "VF"
+          description: "Verifying refactor did not break tests"
+      description: >
+        Each AC tracks its TDD phase. The tactical display shows a
+        compact phase chain (RED -> GREEN -> REFACTOR) with color-coded
+        symbols. Gate results (PASS/FAIL) appear inline after each
+        verify phase.
+
+    wave_progress:
+      pattern: "progress-bar"
+      description: >
+        Each wave shows a block-character progress bar with done/total
+        count: Wave 1: [########....] 3/4 done. Color transitions from
+        butterscotch (in progress) to green_ok (complete). The bar uses
+        harmonica over-damped springs for smooth fill animation.
+
+    agent_status:
+      pattern: "status-card-list"
+      fields:
+        - "agent_id (truncated to 8 chars)"
+        - "mission_id (bracketed)"
+        - "role (abbreviated: impl, rev, cmdr, capt)"
+        - "phase (TDD phase or lifecycle state)"
+        - "elapsed (MM:SS format)"
+      description: >
+        Agent cards render in a scrollable list within Mission Control.
+        Each card is a single styled line. Status color is determined by
+        the agent lifecycle state (running=butterscotch, done=green_ok,
+        stuck=red_alert, waiting=blue, dead=galaxy_gray).
+
+  # -- Display Modes ---------------------------------------------------------
+
+  display_modes:
+    basic:
+      description: "Simplified view for novice users (Junior Lieutenant persona)"
+      hidden_panels:
+        - dependency_graph
+        - wave_summary
+        - gate_details
+      terminology: "hybrid (task instead of mission, helper instead of agent)"
+      log_lines: 4
+
+    advanced:
+      description: "Full LCARS experience for power users (Staff Commander persona)"
+      visible_panels: "all"
+      terminology: "star-trek (mission, ensign, engage, red alert)"
+      log_lines: 12
+
+    executive:
+      description: "Aggregated metrics for managers (Fleet Admiral persona)"
+      hidden_panels:
+        - agent_details
+        - gate_details
+        - engineering_logs
+      extra_panels:
+        - velocity_trends
+        - multi_project_summary
+      terminology: "business (feature, worker, quality gate, sprint)"
+      log_lines: 0
+
+# -----------------------------------------------------------------------------
+# References
+# -----------------------------------------------------------------------------
+
+references:
+  - name: "Bubble Tea"
+    url: "https://github.com/charmbracelet/bubbletea"
+    version: "v1.x"
+    role: "TUI framework -- Elm architecture (Init, Update, View) for terminal applications"
+
+  - name: "Bubbles"
+    url: "https://github.com/charmbracelet/bubbles"
+    version: "v0.20.x"
+    role: "Component library -- spinner, textinput, textarea, table, progress, paginator, viewport, list, filepicker, timer, stopwatch, help, key"
+
+  - name: "Lipgloss"
+    url: "https://github.com/charmbracelet/lipgloss"
+    version: "v1.x"
+    role: "Styling -- borders, colors (ANSI/256/TrueColor/adaptive), layout (JoinVertical/JoinHorizontal), text decoration (bold/italic/faint/underline/reverse)"
+
+  - name: "Huh"
+    url: "https://github.com/charmbracelet/huh"
+    version: "v0.6.x"
+    role: "Forms -- Input, Text, Select, MultiSelect, Confirm. Native tea.Model. Five built-in themes (Charm/Dracula/Catppuccin/Base16/Default)"
+
+  - name: "Harmonica"
+    url: "https://github.com/charmbracelet/harmonica"
+    version: "v0.2.x"
+    role: "Animation -- Spring physics via NewSpring(timeDelta, angularFrequency, dampingRatio). Under-damped (<1.0) = bouncy, critically-damped (=1.0) = snappy, over-damped (>1.0) = smooth"
+
+  - name: "Log"
+    url: "https://github.com/charmbracelet/log"
+    version: "v0.4.x"
+    role: "Structured logging with Lipgloss styling for development and debug output"
+
+  - name: "Crush (reference architecture)"
+    url: "https://github.com/charmbracelet/crush"
+    role: "Reference for smart-main/dumb-components pattern, compact mode, responsive layout"
+
+  - name: "LCARS Color Guide"
+    url: "https://www.thelcars.com/colors.php"
+    role: "Source palette for LCARS Classic theme colors"
+
+# -----------------------------------------------------------------------------
+# Terminology
+# -----------------------------------------------------------------------------
+
+terminology:
+  # Star Trek Term -> UI Element / System Concept
+  admiral: "The human operator. Makes strategic decisions, approves plans, answers agent questions."
+  commission: "A top-level work initiative parsed from a PRD. Parent of missions."
+  mission: "A discrete unit of work assigned to an agent. Child of commission, parent of ACs."
+  acceptance_criteria: "A testable condition within a mission. Drives the TDD loop."
+  wave: "A dependency-ordered batch of missions executed in parallel."
+  ready_room: "The planning phase where Captain, Commander, and Design Officer analyze a commission."
+  ship_bridge: "Per-ship runtime monitoring view. Shows crew (agents), mission board, event log, and inline wave summary in header."
+  fleet_overview: "Landing screen. Grid of ship cards with preview panel. One ship per directive."
+  fleet_monitor: "Condensed multi-ship status. Each ship is a single ShipStatusRow with inline progress."
+  plan_review: "Full-screen drill-down from Ready Room. Mission manifest + coverage matrix + dependency graph."
+  captain: "AI agent role: triages the PRD, validates completeness, determines specialist needs."
+  commander: "AI agent role: technical analysis, infrastructure identification, mission decomposition."
+  design_officer: "AI agent role: UI/UX analysis, design artifact creation (conditional on UI requirements)."
+  implementer: "AI agent role: executes TDD loop on a mission's acceptance criteria."
+  reviewer: "AI agent role: reviews completed mission implementation for quality."
+  gate: "Deterministic verification step: configurable bash command + exit code check. No AI involved. Gate commands (test, lint, typecheck, build) are configured in Project Settings as raw bash strings -- works for any language."
+  project_settings: "Global configuration screen. Verification gates, crew defaults, fleet defaults, and export/import. Settings are global (not per-project) so they carry across all projects."
+  red_alert: "Mission classification for critical/high-risk work requiring tests + additional evidence."
+  standard_ops: "Mission classification for routine work requiring at least one evidence type."
+  doctor: "Background health monitor. Detects stuck agents, orphaned sessions, heartbeat failures."
+  propulsion: "The execution engine that dispatches agents to missions based on wave ordering and WIP limits."
+  engineering_logs: "The scrollable event log panel showing protocol events with severity filtering."
+  navigable_toolbar: "Bottom bar of shortcut buttons on every view. Arrow Left/Right to highlight, Enter to select, or press quick key directly. Like htop/Midnight Commander bottom bar."
+  ac_phase_detail: "Per-AC TDD phase tracker shown in Mission Detail drill-down. 6-dot pipeline with inline gate results."
+  ship_status_row: "Single-line ship representation in Fleet Monitor. Shows name, directive, progress, crew health, wave status."
+  mission_board: "Kanban-style panel showing mission counts by state (Backlog, In Progress, Review, Done, Halted)."
+  demo_token: "Evidence artifact (demo/MISSION-<id>.md) proving a mission was completed."
+  worktree: "Isolated Git worktree where an agent executes mission implementation."
+  surface_area_lock: "File-glob-based lock preventing concurrent modification of the same code paths."
+  beads: "Persistent state layer (Git + SQLite) storing commissions, missions, ACs, agents, events."
+  engage: "Approve and begin execution (approve plan, start propulsion)."
+  shields: "Gate verification protecting main branch from unvalidated changes."
+  transporter: "Merge operation moving completed work from worktree branch to main."
+  away_team: "Set of agents dispatched to execute missions in a wave."
+  formation: "Wave of missions being executed in parallel."
+  helm_control: "Deprecated. Replaced by NavigableToolbar with context-sensitive actions per view."
+  stardate: "Timestamp displayed in event logs and status headers."
+
+# =============================================================================
+# Library References
+# =============================================================================
+# Agents implementing from this file MUST use these exact imports and APIs.
+
+references:
+  - name: bubble-tea
+    package: "github.com/charmbracelet/bubbletea"
+    version: ">=1.2.0"
+    url: "https://github.com/charmbracelet/bubbletea"
+    used_for: "Elm architecture framework -- tea.Model, tea.Cmd, tea.Msg, tea.Program"
+    api_mapping:
+      core:
+        - "tea.Model interface: Init(), Update(tea.Msg), View() string"
+        - "tea.Program: p := tea.NewProgram(model); p.Run()"
+        - "tea.WindowSizeMsg -- terminal resize events"
+        - "tea.KeyMsg -- keyboard input routing"
+        - "tea.Batch(...tea.Cmd) -- concurrent command dispatch"
+      patterns:
+        - "smart_main_dumb_components: root tea.Model owns all state; child components are pure render functions"
+        - "message_passing: parent dispatches tea.Cmd; children return tea.Msg"
+
+  - name: lipgloss
+    package: "github.com/charmbracelet/lipgloss"
+    version: ">=1.0.0"
+    url: "https://github.com/charmbracelet/lipgloss"
+    used_for: "Styling, borders, layout composition, color system"
+    api_mapping:
+      composition:
+        - "lipgloss.JoinVertical(pos, ...string) -- vertical stacking"
+        - "lipgloss.JoinHorizontal(pos, ...string) -- horizontal layout"
+        - "lipgloss.Place(w, h, hPos, vPos, string) -- absolute positioning (modals)"
+      styles:
+        - "lipgloss.NewStyle() -- create style"
+        - "style.Inherit(other) -- immutable composition"
+        - "style.Render(string) -- apply style to text"
+      colors:
+        - "lipgloss.Color(hex) -- true color"
+        - "lipgloss.AdaptiveColor{Light, Dark} -- terminal-aware"
+      borders:
+        - "lipgloss.RoundedBorder() -- standard panels"
+        - "lipgloss.DoubleBorder() -- modals"
+        - "lipgloss.ThickBorder() -- alerts"
+        - "lipgloss.NormalBorder() -- inactive"
+      measurement:
+        - "lipgloss.Width(string) -- rendered width"
+        - "lipgloss.Height(string) -- rendered height"
+
+  - name: bubbles
+    package: "github.com/charmbracelet/bubbles"
+    version: ">=0.20.0"
+    url: "https://github.com/charmbracelet/bubbles"
+    used_for: "Pre-built tea.Model components"
+    api_mapping:
+      components:
+        - "bubbles/spinner -- loading indicators (AgentGrid, SpecialistCard)"
+        - "bubbles/viewport -- scrollable content (EventLog, OutputViewport)"
+        - "bubbles/list -- filterable lists (AgentGrid)"
+        - "bubbles/table -- tabular data (CoverageMatrix, GateEvidenceTable)"
+        - "bubbles/progress -- progress bars (WaveProgressBar)"
+        - "bubbles/help + bubbles/key -- auto-generated keybinding help (HelpOverlay)"
+        - "bubbles/stopwatch -- count-up timer (ElapsedTimer)"
+        - "bubbles/timer -- countdown timer (GateCountdown)"
+        - "bubbles/filepicker -- file browser (PRDFilePicker)"
+        - "bubbles/paginator -- pagination (MissionBoard expanded)"
+
+  - name: huh
+    package: "github.com/charmbracelet/huh"
+    version: ">=0.6.0"
+    url: "https://github.com/charmbracelet/huh"
+    used_for: "Terminal forms -- all Admiral input interactions"
+    api_mapping:
+      components:
+        - "huh.Input -- single-line text entry (CommandBar)"
+        - "huh.Text -- multi-line text entry (PlanApprovalForm feedback)"
+        - "huh.Select -- option selection (AdmiralQuestionForm, PlanApprovalForm)"
+        - "huh.Confirm -- yes/no confirmation (ConfirmDialog, broadcast toggle)"
+        - "huh.Form -- groups multiple fields into a single tea.Model"
+      integration:
+        - "huh implements tea.Model -- composes directly into Bubble Tea"
+        - "huh.NewForm().WithTheme(theme) -- custom Lipgloss theming"
+
+  - name: glamour
+    package: "github.com/charmbracelet/glamour"
+    version: ">=0.8.0"
+    url: "https://github.com/charmbracelet/glamour"
+    used_for: "Markdown rendering -- PRD content, mission specs, demo tokens, gate output"
+    api_mapping:
+      rendering:
+        - "glamour.Render(markdown, style) -- render markdown string"
+        - "glamour.RenderWithEnvironmentConfig(markdown) -- auto-detect terminal"
+        - "glamour.WithWordWrap(width) -- constrain to panel width"
+
+  - name: harmonica
+    package: "github.com/charmbracelet/harmonica"
+    version: ">=0.2.0"
+    url: "https://github.com/charmbracelet/harmonica"
+    used_for: "Physics-based spring animations for TUI transitions"
+    api_mapping:
+      springs:
+        - "harmonica.NewSpring(frequency, dampingRatio)"
+        - "spring.Update(targetValue, velocity, deltaTime)"
+      damping_categories:
+        - "ratio=1.0: critically-damped (snappy, no overshoot) -- view switches, modal close"
+        - "ratio<1.0: under-damped (bounce) -- alerts, notifications, attention"
+        - "ratio>1.0: over-damped (slow approach) -- progress bars, smooth reflow"
+
+  - name: log
+    package: "github.com/charmbracelet/log"
+    version: ">=0.4.0"
+    url: "https://github.com/charmbracelet/log"
+    used_for: "Structured logging with Lipgloss styling -- all application logging"
+    api_mapping:
+      levels:
+        - "log.Info(msg, keyvals...) -- informational events"
+        - "log.Warn(msg, keyvals...) -- warning events"
+        - "log.Error(msg, keyvals...) -- error events"
+        - "log.Debug(msg, keyvals...) -- debug-only events"
+      integration:
+        - "log.NewWithOptions(io.Writer, log.Options{}) -- custom logger"
+        - "Compatible with slog.Handler interface"

@@ -1,0 +1,119 @@
+# golangci-lint configuration for Ship Commander 3
+# Based on Go coding standards research
+# Reference: .spec/research-findings/GO_CODING_STANDARDS.md
+
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+  go: '1.22'
+
+linters:
+  # Core linters from Go coding standards
+  enable:
+    # Error checking
+    - errcheck          # Check for unchecked errors (non-negotiable)
+    - gofmt            # Check that code is gofmt-ed (non-negotiable)
+    - goimports        # Import management (non-negotiable, superset of gofmt)
+
+    # Style and quality
+    - revive           # Style checker (modern golint replacement)
+    - govet            # Official Go vet analyzer
+    - staticcheck      # Bug detection and performance issues
+    - ineffassign      # Detect ineffectual assignments
+    - misspell         # Find commonly misspelled words
+    - gocyclo          # Compute cyclomatic complexities
+    - gosec            # Security problems
+
+    # Additional useful linters
+    - bodyclose        # Check whether HTTP response body is closed
+    - deadcode         # Find unused code
+    - depguard         # Check for import restrictions
+    - gosimple         # Simplify code suggestions
+    - typecheck        # Parse and type-check code
+    - unconvert        # Remove unnecessary type conversions
+    - unused           # Check for unused constants, variables, functions
+    - whitespace       # Detection of leading and trailing whitespace
+
+linters-settings:
+  # Error checking configuration
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+
+  # Style checker configuration
+  revive:
+    severity: warning
+    rules:
+      # Require comments on exported symbols
+      - name: exported-functions-have-comments
+        severity: warning
+      - name: exported-var-have-comments
+        severity: warning
+      # Naming conventions
+      - name: var-naming
+        severity: warning
+      # Import ordering
+      - name: imports-blacklist
+        severity: warning
+      # Error handling
+      - name: error-naming
+        severity: warning
+      - name: error-strings
+        severity: warning
+
+  # Static analysis configuration
+  staticcheck:
+    checks: ["all"]
+
+  # Go vet configuration
+  govet:
+    enable-all: true
+    disable:
+      - shadow  # Shadowing variables can be useful in Go
+
+  # Cyclomatic complexity
+  gocyclo:
+    min-complexity: 15  # Flag functions with complexity > 15
+
+  # Security
+  gosec:
+    excludes:
+      # Exclude in development code
+      - G104  # Errors unchecked (already covered by errcheck)
+
+  # Import restrictions
+  depguard:
+    include-go-root: false
+    packages:
+      # Forbid deprecated packages
+      - io/ioutil: "Use io and os packages instead (Go 1.16+)"
+
+  # Spelling
+  misspell:
+    locale: US
+
+issues:
+  # Don't use default exclude patterns
+  exclude-use-default: false
+
+  # Max issues per linter (0 = unlimited)
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+  # Exclude specific issues
+  exclude:
+    # Exclude "don't use XXX" for test files
+    - 'G104: Errors unchecked'
+    # Exclude comments for generated code
+    - 'should have comment.*or be unexported'
+
+  # Only show new issues in CI
+  new: false
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  uniq-by-line: true
+  sort-results: true

@@ -1,0 +1,80 @@
+{
+  "design_key": "onboarding-overlay",
+  "name": "Onboarding Overlay",
+  "version": "2.0",
+  "description": "First-run onboarding tour that guides the Junior Lieutenant through the TUI panels and concepts. Step-by-step carousel with panel highlights. Only appears on first launch (no prior state exists) or via 'sc3 tui --onboarding'.",
+  "screen": {
+    "type": "global",
+    "parent": "app-root",
+    "children": [],
+    "mode_availability": { "basic": true, "advanced": false, "executive": false },
+    "mode_differences": {
+      "basic": ["Full 5-step tour with highlighted panels and explanatory tooltips"]
+    }
+  },
+  "layout": {
+    "structure": "TooltipCard anchored to highlighted panel region",
+    "overlay": {
+      "width": "50%",
+      "height": "auto",
+      "position": "anchored to highlighted panel",
+      "background": "highlighted panel regions (rest dimmed)",
+      "animation": {
+        "open": "modal_open (freq=6.0, ratio=0.8) -- tooltip bounces in",
+        "step_transition": "view_switch (freq=8.0, ratio=1.0) -- tooltip slides to next panel",
+        "close": "modal_close (freq=10.0, ratio=1.0) -- tooltip fades out"
+      }
+    },
+    "rows": [
+      { "name": "tooltip-header", "height": 1, "panels": [
+        { "id": "step-indicator", "width": "100%", "description": "'Step N of 5' in butterscotch. Progress dots showing completed/current/remaining steps." }
+      ]},
+      { "name": "tooltip-content", "height": "auto", "panels": [
+        { "id": "tooltip-text", "width": "100%", "description": "Explanation text for the current panel/concept. Uses Glamour markdown for formatting. Key terms in butterscotch bold." }
+      ]},
+      { "name": "tooltip-nav", "height": 1, "panels": [
+        { "id": "tooltip-navigation", "width": "100%", "description": "'[Enter] Next  [Esc] Skip Tour' in dim light_gray. On last step: '[Enter] Start  [Esc] Skip'." }
+      ]}
+    ],
+    "responsive": {
+      "standard": { "min_width": 80, "description": "Tooltip anchored to highlighted panel with generous padding" },
+      "compact": { "threshold": "<80 cols", "description": "Tooltip centered below highlighted region. Narrower text." }
+    }
+  },
+  "tour_steps": [
+    { "step": 1, "target_panel": "ship-list", "title": "Your Fleet", "description": "This is your fleet -- each ship represents a project commission with its own crew and missions. Press Enter to drill into any ship." },
+    { "step": 2, "target_panel": "crew-panel", "title": "Your Crew", "description": "Agents are your crew. They execute missions autonomously using TDD (Test-Driven Development). Each has a role: Captain plans, Commander verifies, Ensigns code." },
+    { "step": 3, "target_panel": "mission-board", "title": "Mission Board", "description": "Missions are units of work derived from your directive (PRD). Each mission goes through waves of execution with verification gates." },
+    { "step": 4, "target_panel": "event-log", "title": "Event Log", "description": "The event log shows real-time activity across your ship -- gate results, agent status changes, and alerts." },
+    { "step": 5, "target_panel": "navigable-toolbar", "title": "Navigation", "description": "Use the toolbar at the bottom for quick actions. Arrow keys navigate, Enter activates. Press ? anytime for keyboard shortcuts." }
+  ],
+  "components": [
+    { "name": "ModalOverlay", "charm_base": "lipgloss.Place + lipgloss.NewStyle().Border(lipgloss.DoubleBorder())", "tokens_used": ["butterscotch", "space_white", "bg_modal"], "variants": ["onboarding"] },
+    { "name": "TooltipCard", "charm_base": "lipgloss.NewStyle().Border(lipgloss.RoundedBorder())", "tokens_used": ["butterscotch", "gold", "space_white", "light_gray", "galaxy_gray"], "variants": ["default"] },
+    { "name": "StepIndicator", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["butterscotch", "green_ok", "galaxy_gray", "space_white"], "variants": ["default"] }
+  ],
+  "data_sources": [
+    { "source": "onboarding_state", "description": "Current step, completion status, whether first launch" },
+    { "source": "active_view", "description": "Fleet Overview layout for panel highlight positioning" }
+  ],
+  "keyboard": {
+    "global": {},
+    "view_specific": { "Enter": "Next step (or Start on last step)", "Escape": "Skip tour and activate basic mode", "Left": "Previous step", "Right": "Next step" },
+    "toolbar_buttons": []
+  },
+  "transitions": [
+    { "from": "fleet-overview", "to": "onboarding-overlay", "trigger": "First launch (no .beads/ and no sc3.toml) or --onboarding flag", "type": "overlay_open", "animation": { "preset": "modal_open" } },
+    { "to": "fleet-overview", "trigger": "Tour completed or skipped", "type": "overlay_close", "animation": { "preset": "modal_close" } }
+  ],
+  "special_behavior": [
+    { "trigger": "First launch detected", "behavior": "Onboarding overlay appears automatically. Fleet Overview visible but dimmed behind the tour. Basic mode activated." },
+    { "trigger": "Tour step advances", "behavior": "Previous panel highlight fades. New panel highlighted with butterscotch border glow. Tooltip slides to new anchor position via view_switch spring." },
+    { "trigger": "Tour completed", "behavior": "Overlay dismissed. Basic mode remains active. Welcome message in event log: 'Welcome aboard, Admiral! Your fleet awaits.'" },
+    { "trigger": "Tour skipped (Escape)", "behavior": "Overlay dismissed immediately. Basic mode still activated. No welcome message." }
+  ],
+  "tokens": {
+    "colors": { "primary": "butterscotch", "accent": "gold" },
+    "borders": { "default": "lipgloss.RoundedBorder() in butterscotch", "highlight": "lipgloss.RoundedBorder() in gold with glow effect" },
+    "icons": { "step_complete": "\u2713", "step_current": "\u25B8", "step_pending": "\u25CB" }
+  }
+}

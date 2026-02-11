@@ -1,0 +1,84 @@
+{
+  "design_key": "admiral-question-modal",
+  "name": "Admiral Question Modal",
+  "version": "2.0",
+  "description": "Modal overlay for agent-to-Admiral questions. Can appear over any view whenever an agent surfaces a question. Steals all keyboard input until answered. Non-dismissable -- must submit response.",
+  "screen": {
+    "type": "overlay",
+    "parent": "app-root",
+    "children": [],
+    "mode_availability": { "basic": true, "advanced": true, "executive": true },
+    "mode_differences": {
+      "basic": ["Question text includes simplified context explanation", "Options include descriptive subtext"],
+      "advanced": ["Full question context with Glamour markdown rendering"],
+      "executive": ["Compact question presentation, options only"]
+    }
+  },
+  "layout": {
+    "structure": "ModalHeader | QuestionContent | OptionSelect | FreeTextInput | BroadcastToggle | SubmitHint",
+    "overlay": {
+      "width": "60%",
+      "height": "auto",
+      "position": "centered",
+      "background": "dimmed underlying view",
+      "animation": {
+        "open": "modal_open (freq=6.0, ratio=0.8) -- bounces in to grab attention",
+        "close": "modal_close (freq=10.0, ratio=1.0) -- crisp dismiss after answer"
+      }
+    },
+    "rows": [
+      { "name": "modal-header", "height": 2, "panels": [
+        { "id": "question-header", "width": "100%", "description": "'ADMIRAL -- QUESTION FROM <Agent Name>' in bold butterscotch. Ship name (faint). Role badge (Captain=gold, Commander=blue, Ensign=butterscotch). Domain badge (functional=blue, technical=butterscotch, design=purple)." }
+      ]},
+      { "name": "question-content", "height": "auto", "panels": [
+        { "id": "question-text", "width": "100%", "description": "Question text via Glamour markdown rendering. Context information rendered below in light_gray. Mission ID reference if applicable." }
+      ]},
+      { "name": "options", "height": "auto", "panels": [
+        { "id": "option-select", "width": "100%", "description": "huh.Select with predefined answer options. Each option on its own line. Selected option highlighted moonlit_violet. Up/Down to navigate." }
+      ]},
+      { "name": "free-text", "height": "auto", "panels": [
+        { "id": "free-text-input", "width": "100%", "description": "huh.Input for free-text answer. Placeholder: 'Type a custom response...' in galaxy_gray. Shown when allow_free_text is true." }
+      ]},
+      { "name": "broadcast-toggle", "height": 1, "panels": [
+        { "id": "broadcast-toggle", "width": "100%", "description": "huh.Confirm toggle: 'Broadcast answer to all crew?' Default: No. When enabled, answer is shared fleet-wide." }
+      ]},
+      { "name": "submit-hint", "height": 1, "panels": [
+        { "id": "submit-hint", "width": "100%", "description": "'Press Enter to submit' in dim light_gray, centered." }
+      ]}
+    ],
+    "responsive": {
+      "standard": { "min_width": 80, "description": "Full modal layout with all fields visible" },
+      "compact": { "threshold": "<80 cols", "description": "Modal takes 80% width. Options stack tighter. Free-text input height reduced." }
+    }
+  },
+  "components": [
+    { "name": "ModalOverlay", "charm_base": "lipgloss.Place + lipgloss.NewStyle().Border(lipgloss.DoubleBorder())", "tokens_used": ["gold", "space_white", "bg_modal"], "variants": ["question"] },
+    { "name": "AdmiralQuestionForm", "charm_base": "huh.Form (huh.Note + huh.Select + huh.Input + huh.Confirm)", "tokens_used": ["butterscotch", "gold", "blue", "purple", "moonlit_violet", "space_white", "galaxy_gray", "light_gray"], "variants": ["with_options", "free_text_only"] },
+    { "name": "StatusBadge", "charm_base": "lipgloss.NewStyle()", "tokens_used": ["gold", "blue", "butterscotch", "purple"], "variants": ["captain", "commander", "ensign", "domain_functional", "domain_technical", "domain_design"] },
+    { "name": "Viewport", "charm_base": "bubbles.viewport + glamour.Render", "tokens_used": ["butterscotch", "space_white", "light_gray"], "variants": ["question_context"] }
+  ],
+  "data_sources": [
+    { "source": "admiral_question", "description": "Question event with agent identity, ship, domain, content, options" },
+    { "source": "agent_instance", "description": "Asking agent's role, name, ship assignment" },
+    { "source": "mission_instance", "description": "Mission context for the question (if applicable)" }
+  ],
+  "keyboard": {
+    "global": { "Tab": "Cycle fields: option-select -> free-text-input -> broadcast-toggle" },
+    "view_specific": { "Up/Down": "Navigate option list", "Tab": "Cycle form fields", "Enter": "Submit response" },
+    "toolbar_buttons": []
+  },
+  "transitions": [
+    { "from": "any", "to": "admiral-question-modal", "trigger": "ADMIRAL_QUESTION event", "type": "overlay_open", "animation": { "preset": "modal_open", "property": "opacity + scale" } },
+    { "to": "previous", "trigger": "Form submitted", "type": "overlay_close", "animation": { "preset": "modal_close", "property": "opacity + scale" } }
+  ],
+  "special_behavior": [
+    { "trigger": "Question appears", "behavior": "Modal bounces in via modal_open spring. All keyboard input captured. Underlying view dimmed." },
+    { "trigger": "Response submitted", "behavior": "Modal dismissed via modal_close. Underlying view restored. If broadcast enabled, answer propagated to all crew." },
+    { "trigger": "Multiple questions queued", "behavior": "Questions answered one at a time. Badge in header shows remaining count: '1 of N questions'." }
+  ],
+  "tokens": {
+    "colors": { "primary": "butterscotch", "accent": "gold" },
+    "borders": { "default": "lipgloss.DoubleBorder() in gold" },
+    "icons": { "question": "\u2753", "broadcast": "\u{1F4E2}" }
+  }
+}

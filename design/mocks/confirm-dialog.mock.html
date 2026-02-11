@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confirm Dialog - Ship Commander 3 TUI</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #1a1a2e;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.4;
+            color: #F5F6FA;
+            padding: 40px 20px;
+            overflow-x: hidden;
+        }
+
+        .terminal-frame {
+            max-width: 1100px;
+            margin: 0 auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            border-radius: 8px;
+            background: #2D2D2D;
+        }
+
+        .title-bar {
+            background: #2D2D2D;
+            padding: 12px 16px;
+            border-radius: 8px 8px 0 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .dots {
+            display: flex;
+            gap: 8px;
+        }
+
+        .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .dot.red { background: #FF5F56; }
+        .dot.yellow { background: #FFBD2E; }
+        .dot.green { background: #27C93F; }
+
+        .window-title {
+            flex: 1;
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+        }
+
+        .terminal-body {
+            background: #000000;
+            border-radius: 0 0 8px 8px;
+            padding: 24px;
+            min-height: 500px;
+            position: relative;
+        }
+
+        /* Dimmed background (Ship Bridge) */
+        .background-view {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            padding: 24px;
+            opacity: 0.15;
+            color: #F5F6FA;
+            pointer-events: none;
+        }
+
+        .bg-header {
+            font-weight: bold;
+            margin-bottom: 12px;
+            color: #FF9966;
+        }
+
+        .bg-content {
+            white-space: pre;
+        }
+
+        /* Modal overlay */
+        .modal-overlay {
+            position: relative;
+            width: 50%;
+            margin: 80px auto;
+            z-index: 10;
+        }
+
+        .modal-container {
+            border: 2px solid #FF3333;
+            border-style: double;
+            background: #000000;
+            padding: 20px;
+            animation: modalBounce 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+        }
+
+        @keyframes modalBounce {
+            0% {
+                transform: scale(0.9);
+                opacity: 0;
+            }
+            60% {
+                transform: scale(1.05);
+            }
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .modal-border-top {
+            color: #FF3333;
+            margin-bottom: 12px;
+        }
+
+        .modal-border-bottom {
+            color: #FF3333;
+            margin-top: 12px;
+        }
+
+        .modal-icon {
+            text-align: center;
+            font-size: 24px;
+            color: #FF3333;
+            margin-bottom: 12px;
+        }
+
+        .modal-title {
+            text-align: center;
+            color: #FF3333;
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+
+        .modal-description {
+            color: #F5F6FA;
+            text-align: center;
+            line-height: 1.6;
+            margin-bottom: 16px;
+        }
+
+        .modal-details {
+            border: 1px solid #52526A;
+            border-radius: 4px;
+            padding: 12px;
+            margin-bottom: 20px;
+            background: rgba(255, 51, 51, 0.05);
+        }
+
+        .detail-row {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 4px;
+        }
+
+        .detail-label {
+            color: #9999CC;
+            min-width: 90px;
+        }
+
+        .detail-value {
+            color: #F5F6FA;
+        }
+
+        .detail-value.warning {
+            color: #FFCC00;
+        }
+
+        .confirm-options {
+            display: flex;
+            justify-content: center;
+            gap: 24px;
+            margin-top: 16px;
+        }
+
+        .confirm-btn {
+            padding: 6px 20px;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: bold;
+            cursor: pointer;
+            border: 1px solid;
+        }
+
+        .confirm-btn.danger {
+            background: rgba(255, 51, 51, 0.2);
+            border-color: #FF3333;
+            color: #FF3333;
+        }
+
+        .confirm-btn.danger.selected {
+            background: #FF3333;
+            color: #000000;
+        }
+
+        .confirm-btn.cancel {
+            background: rgba(82, 82, 106, 0.2);
+            border-color: #52526A;
+            color: #CCCCCC;
+        }
+
+        .confirm-btn.cancel.selected {
+            background: #52526A;
+            color: #F5F6FA;
+        }
+
+        .confirm-hint {
+            text-align: center;
+            color: #52526A;
+            font-size: 11px;
+            margin-top: 16px;
+        }
+
+        .confirm-hint strong {
+            color: #9966FF;
+        }
+
+        /* Second example: shelve plan */
+        .example-separator {
+            margin: 60px 0 20px 0;
+            text-align: center;
+            color: #52526A;
+            font-size: 11px;
+        }
+
+        .modal-container.shelve {
+            border-color: #FFCC00;
+        }
+
+        .shelve-title {
+            color: #FFCC00;
+        }
+
+        .shelve-border {
+            color: #FFCC00;
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal-frame">
+        <div class="title-bar">
+            <div class="dots">
+                <div class="dot red"></div>
+                <div class="dot yellow"></div>
+                <div class="dot green"></div>
+            </div>
+            <div class="window-title">sc3 tui — Confirm Dialog Variants</div>
+        </div>
+
+        <div class="terminal-body">
+            <!-- Dimmed background view -->
+            <div class="background-view">
+                <div class="bg-header">╔═══════════════════════════════════════════════════════════════════════════╗</div>
+                <div class="bg-header">║                          SHIP BRIDGE - SS ENTERPRISE                       ║</div>
+                <div class="bg-header">╚═══════════════════════════════════════════════════════════════════════════╝</div>
+                <div class="bg-content">
+│ CREW ROSTER                                                               │
+│                                                                           │
+│  capt-alpha          [>] ACTIVE    MISSION-01                            │
+│  impl-bravo          [>] ACTIVE    MISSION-03  RED                       │
+│  impl-charlie        [>] ACTIVE    MISSION-04  GREEN                     │
+│  rev-delta           [~] REVIEW    MISSION-05                            │
+│                                                                           │
+│ MISSION BOARD                                                             │
+│  B:2  IP:3  R:1  D:5  H:0                                               │
+                </div>
+            </div>
+
+            <!-- Halt Mission Confirmation -->
+            <div class="modal-overlay">
+                <div class="modal-container">
+                    <div class="modal-border-top">╔══════════════════════════════════════════════════╗</div>
+
+                    <div class="modal-icon">[!] RED ALERT</div>
+
+                    <div class="modal-title">HALT MISSION?</div>
+
+                    <div class="modal-description">
+                        This will stop the active agent and return<br>
+                        the mission to the backlog. The worktree<br>
+                        will be preserved.
+                    </div>
+
+                    <div class="modal-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Mission:</span>
+                            <span class="detail-value">MISSION-03</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Agent:</span>
+                            <span class="detail-value">impl-bravo</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Phase:</span>
+                            <span class="detail-value warning">RED (02:15 elapsed)</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Worktree:</span>
+                            <span class="detail-value">.worktrees/mission-03/</span>
+                        </div>
+                    </div>
+
+                    <div class="confirm-options">
+                        <span class="confirm-btn danger selected">[!] Halt</span>
+                        <span class="confirm-btn cancel">Cancel</span>
+                    </div>
+
+                    <div class="confirm-hint">
+                        <strong>Left/Right</strong> to select · <strong>Enter</strong> to confirm · <strong>Esc</strong> to cancel
+                    </div>
+
+                    <div class="modal-border-bottom">╚══════════════════════════════════════════════════╝</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Second variant: Shelve Plan -->
+    <div class="example-separator">── Variant: Shelve Plan ──</div>
+
+    <div class="terminal-frame" style="margin-top: 0;">
+        <div class="title-bar">
+            <div class="dots">
+                <div class="dot red"></div>
+                <div class="dot yellow"></div>
+                <div class="dot green"></div>
+            </div>
+            <div class="window-title">sc3 tui — Shelve Confirmation</div>
+        </div>
+
+        <div class="terminal-body" style="min-height: 350px;">
+            <div class="modal-overlay" style="margin: 40px auto;">
+                <div class="modal-container shelve">
+                    <div class="shelve-border">╔══════════════════════════════════════════════════╗</div>
+
+                    <div class="modal-icon" style="color: #FFCC00;">[~] CAUTION</div>
+
+                    <div class="modal-title shelve-title">SHELVE PLAN?</div>
+
+                    <div class="modal-description">
+                        This will save the current mission manifest<br>
+                        for later review. The Ready Room specialists<br>
+                        will be released.
+                    </div>
+
+                    <div class="modal-details" style="background: rgba(255, 204, 0, 0.05);">
+                        <div class="detail-row">
+                            <span class="detail-label">Ship:</span>
+                            <span class="detail-value">SS Enterprise</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Directive:</span>
+                            <span class="detail-value">auth-system</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Missions:</span>
+                            <span class="detail-value">10 planned (3 waves)</span>
+                        </div>
+                    </div>
+
+                    <div class="confirm-options">
+                        <span class="confirm-btn cancel selected">Cancel</span>
+                        <span class="confirm-btn" style="background: rgba(255, 204, 0, 0.2); border-color: #FFCC00; color: #FFCC00;">[~] Shelve</span>
+                    </div>
+
+                    <div class="confirm-hint">
+                        <strong>Left/Right</strong> to select · <strong>Enter</strong> to confirm · <strong>Esc</strong> to cancel
+                    </div>
+
+                    <div class="shelve-border">╚══════════════════════════════════════════════════╝</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,106 @@
+{
+  "name": "Ship Commander 3 Design Specs",
+  "version": "2.0",
+  "description": "Specification files for pixel-perfect mockup generation. One spec per renderable screen from design/screens.yaml.",
+  "generated_from": [
+    "design/screens.yaml",
+    "design/views.yaml",
+    "design/components.yaml",
+    "design/flows.yaml",
+    "design/paradigm.yaml",
+    "design/config.yaml"
+  ],
+  "specs": [
+    {
+      "file": "fleet-overview.spec.json",
+      "design_key": "fleet-overview",
+      "name": "Fleet Overview",
+      "screen_type": "primary",
+      "description": "Landing screen -- Admiral's command center showing all commissioned ships"
+    },
+    {
+      "file": "fleet-monitor.spec.json",
+      "design_key": "fleet-monitor",
+      "name": "Fleet Monitor",
+      "screen_type": "primary",
+      "description": "Condensed real-time monitoring view for all launched ships"
+    },
+    {
+      "file": "ship-bridge.spec.json",
+      "design_key": "ship-bridge",
+      "name": "Ship Bridge",
+      "screen_type": "primary",
+      "description": "Per-ship execution dashboard with crew, missions, events, and wave progress"
+    },
+    {
+      "file": "ready-room.spec.json",
+      "design_key": "ready-room",
+      "name": "Ready Room",
+      "screen_type": "drill-down",
+      "description": "Directive planning view with specialist crew sessions and sign-off tracking"
+    },
+    {
+      "file": "specialist-detail.spec.json",
+      "design_key": "specialist-detail",
+      "name": "Specialist Detail",
+      "screen_type": "drill-down",
+      "description": "Read-only drill-down for a single planning specialist's session output"
+    },
+    {
+      "file": "plan-review.spec.json",
+      "design_key": "plan-review",
+      "name": "Plan Review",
+      "screen_type": "drill-down",
+      "description": "Mission manifest review with coverage matrix, dependency graph, and approval controls"
+    },
+    {
+      "file": "agent-detail.spec.json",
+      "design_key": "agent-detail",
+      "name": "Agent Detail",
+      "screen_type": "drill-down",
+      "description": "Full-screen drill-down for a single agent with output viewport and error context"
+    },
+    {
+      "file": "mission-detail.spec.json",
+      "design_key": "mission-detail",
+      "name": "Mission Detail",
+      "screen_type": "drill-down",
+      "description": "Mission drill-down with AC phase pipelines, gate evidence, and demo token preview"
+    },
+    {
+      "file": "wave-manager.spec.json",
+      "design_key": "wave-manager",
+      "name": "Wave Manager",
+      "screen_type": "overlay",
+      "description": "Overlay for reviewing wave execution and batch-merging completed missions"
+    },
+    {
+      "file": "project-settings.spec.json",
+      "design_key": "project-settings",
+      "name": "Project Settings",
+      "screen_type": "top-level",
+      "description": "Global configuration with verification gates, crew/fleet defaults, and export/import"
+    },
+    {
+      "file": "admiral-question-modal.spec.json",
+      "design_key": "admiral-question-modal",
+      "name": "Admiral Question Modal",
+      "screen_type": "overlay",
+      "description": "Non-dismissable modal for agent-to-Admiral questions with option select and free text"
+    },
+    {
+      "file": "help-overlay.spec.json",
+      "design_key": "help-overlay",
+      "name": "Help Overlay",
+      "screen_type": "global",
+      "description": "Context-aware keyboard shortcut overlay toggled with '?' from any screen"
+    },
+    {
+      "file": "onboarding-overlay.spec.json",
+      "design_key": "onboarding-overlay",
+      "name": "Onboarding Overlay",
+      "screen_type": "global",
+      "description": "First-run 5-step tour with panel highlights for new users"
+    }
+  ]
+}

@@ -1,0 +1,3171 @@
+# Ship Commander 3 -- TUI Component Library
+# Every component maps to a real Charm library component. No custom rendering from scratch.
+#
+# Charm Libraries Used:
+#   bubbles  -- github.com/charmbracelet/bubbles (spinner, textinput, textarea, table, progress, viewport, list, help, key, stopwatch, timer, paginator, filepicker)
+#   huh      -- github.com/charmbracelet/huh (Input, Text, Select, MultiSelect, Confirm, Note, FilePicker, Form)
+#
+# Huh Usage Map (7 field types, ALL used):
+#   huh.Input       -> CommandBar (wraps bubbles/textinput)
+#   huh.Text        -> PlanApprovalForm (wraps bubbles/textarea)
+#   huh.Select      -> AdmiralQuestionForm, PlanApprovalForm
+#   huh.MultiSelect -> BatchActionSelector (new)
+#   huh.Confirm     -> AdmiralQuestionForm, ConfirmDialog, BatchActionSelector
+#   huh.Note        -> AdmiralQuestionForm, PlanApprovalForm (read-only context)
+#   huh.FilePicker  -> PRDFilePicker (wraps bubbles/filepicker)
+#   lipgloss -- github.com/charmbracelet/lipgloss (styles, borders, layout composition, placement)
+#   harmonica -- github.com/charmbracelet/harmonica (spring physics for animations)
+#
+# Design Tokens Reference:
+#   colors:      see design/config.yaml -> colors
+#   status_icons: done=CHECKMARK, working=BULLET, waiting=PAUSE, skipped=NULL, failed=CROSS, alert=WARNING, pass=CHECKMARK, fail=CROSS, running=PLAY, blocked=DIAMOND
+#
+# Bubbles Usage Map (15 available, 11 direct + 4 via huh/internal):
+#   spinner     -> LoadingSpinner (new), AgentCard working state
+#   textinput   -> (delegated to huh.Input/huh.FilePicker which wrap it)
+#   textarea    -> (delegated to huh.Text which wraps it)
+#   table       -> CoverageMatrix, GateEvidenceTable (new)
+#   progress    -> WaveProgressBar
+#   paginator   -> MissionBoard expanded variant
+#   viewport    -> EventLog, OutputViewport (new)
+#   list        -> AgentGrid, MissionList (new)
+#   filepicker  -> PRDFilePicker (via huh.FilePicker which wraps it)
+#   timer       -> GateCountdown (new)
+#   stopwatch   -> ElapsedTimer
+#   help        -> HelpOverlay
+#   key         -> HelpOverlay, all keybinding registration
+#   cursor      -> (managed internally by textinput/textarea)
+#   runeutil    -> (utility, not a component)
+
+version: "1.0"
+created: "2026-02-10"
+schema: "components"
+
+# ============================================================================
+# COLOR TOKENS
+# ============================================================================
+tokens:
+  colors:
+    butterscotch: "#FF9966"
+    blue: "#9999CC"
+    purple: "#CC99CC"
+    pink: "#FF99CC"
+    gold: "#FFAA00"
+    almond: "#FFAA90"
+    red_alert: "#FF3333"
+    yellow_caution: "#FFCC00"
+    green_ok: "#33FF33"
+    black: "#000000"
+    dark_blue: "#1B4F8F"
+    galaxy_gray: "#52526A"
+    space_white: "#F5F6FA"
+    light_gray: "#CCCCCC"
+    moonlit_violet: "#9966FF"
+    ice: "#99CCFF"
+
+  semantic_colors:
+    # Surfaces
+    bg_primary: black
+    bg_panel: dark_blue
+    bg_modal: black
+    # Text
+    text_primary: space_white
+    text_secondary: light_gray
+    text_disabled: galaxy_gray
+    # Interactive
+    focus_ring: moonlit_violet
+    active_element: butterscotch
+    selected_element: gold
+    # Status
+    status_running: butterscotch
+    status_done: green_ok
+    status_error: red_alert
+    status_warning: yellow_caution
+    status_info: blue
+    status_planning: purple
+    status_notification: pink
+    status_idle: galaxy_gray
+
+  borders:
+    panel: "lipgloss.RoundedBorder"
+    panel_focused: "lipgloss.RoundedBorder"    # same shape, different color
+    modal: "lipgloss.DoubleBorder"
+
+  icons:
+    done: "\u2713"       # CHECKMARK
+    working: "\u25CF"    # BULLET (filled circle)
+    waiting: "\u23F8"    # PAUSE
+    skipped: "\u2298"    # NULL (circle with slash)
+    failed: "\u2717"     # CROSS
+    alert: "\u26A0"      # WARNING
+    pass: "\u2713"       # CHECKMARK
+    fail: "\u2717"       # CROSS
+    running: "\u25B8"    # PLAY (small right triangle)
+    blocked: "\u25C6"    # DIAMOND (filled)
+
+  spacing:
+    panel_padding_x: 1
+    panel_padding_y: 0
+    panel_margin: 0
+    modal_padding_x: 2
+    modal_padding_y: 1
+
+# ============================================================================
+# LAYOUT COMPONENTS
+# ============================================================================
+categories:
+  - name: layout
+    description: "Structural containers that compose the overall TUI layout"
+    components:
+
+      # ----------------------------------------------------------------------
+      # 1. AppShell
+      # ----------------------------------------------------------------------
+      - name: AppShell
+        id: app_shell
+        description: >
+          Top-level layout container. Stacks the HeaderBar, a body region
+          (PanelGrid or single Panel), and a footer region (CommandBar)
+          vertically. Owns terminal width/height and passes dimensions down
+          to children.
+        charm_base: "lipgloss.JoinVertical"
+        props:
+          - name: header
+            type: "HeaderBar"
+            description: "The top header component"
+          - name: body
+            type: "tea.Model"
+            description: "The main content area -- a PanelGrid or single Panel"
+          - name: footer
+            type: "tea.Model"
+            description: "Bottom bar -- typically CommandBar"
+          - name: width
+            type: int
+            description: "Terminal width in columns"
+          - name: height
+            type: int
+            description: "Terminal height in rows"
+        variants: []
+        tokens_used:
+          - bg_primary
+          - text_primary
+        example: |
+          +--------------------------------------------------------------+
+          | SHIP COMMANDER | myproject | Health: *****  | EXECUTING      |
+          |--------------------------------------------------------------|
+          |                                                              |
+          |                    [ body content ]                          |
+          |                                                              |
+          |--------------------------------------------------------------|
+          | > _                                                          |
+          +--------------------------------------------------------------+
+
+      # ----------------------------------------------------------------------
+      # 2. PanelGrid
+      # ----------------------------------------------------------------------
+      - name: PanelGrid
+        id: panel_grid
+        description: >
+          Arranges child Panels side by side horizontally. Each panel is given
+          a percentage of the available width. Wraps to vertical stacking
+          when terminal width drops below the compact threshold (120 cols).
+        charm_base: "lipgloss.JoinHorizontal"
+        props:
+          - name: panels
+            type: "[]Panel"
+            description: "Ordered list of panels to lay out horizontally"
+          - name: ratios
+            type: "[]float64"
+            description: "Width ratios for each panel (must sum to 1.0)"
+          - name: compact_threshold
+            type: int
+            default: 120
+            description: "Below this column count, stack vertically instead"
+          - name: width
+            type: int
+            description: "Available width in columns"
+          - name: height
+            type: int
+            description: "Available height in rows"
+        variants:
+          - name: horizontal
+            description: "Default -- panels side by side"
+          - name: stacked
+            description: "Compact mode -- panels stacked vertically"
+        tokens_used:
+          - bg_primary
+        example: |
+          +--- Panel A (40%) ---+--- Panel B (60%) ----------+
+          |                     |                             |
+          |  [ content A ]      |  [ content B ]              |
+          |                     |                             |
+          +---------------------+-----------------------------+
+
+      # ----------------------------------------------------------------------
+      # 3. Panel
+      # ----------------------------------------------------------------------
+      - name: Panel
+        id: panel
+        description: >
+          Bordered container with a title rendered in the top border.
+          Uses lipgloss RoundedBorder for the border style and lipgloss
+          styling for title text. The title is rendered inline with the
+          top border using lipgloss border rendering.
+        charm_base: "lipgloss.NewStyle().Border(lipgloss.RoundedBorder())"
+        props:
+          - name: title
+            type: string
+            description: "Panel title rendered in the top border"
+          - name: title_color
+            type: string
+            default: "butterscotch"
+            description: "Color token for the title text"
+          - name: border_color
+            type: string
+            default: "blue"
+            description: "Color token for the border"
+          - name: content
+            type: "tea.Model"
+            description: "Inner content model"
+          - name: width
+            type: int
+            description: "Panel width in columns"
+          - name: height
+            type: int
+            description: "Panel height in rows"
+        variants:
+          - name: default
+            description: "Standard blue border"
+            border_color: blue
+          - name: accent
+            description: "Butterscotch border for primary panels"
+            border_color: butterscotch
+          - name: muted
+            description: "Galaxy gray border for inactive/secondary panels"
+            border_color: galaxy_gray
+        tokens_used:
+          - blue
+          - butterscotch
+          - galaxy_gray
+          - space_white
+          - bg_primary
+          - panel_padding_x
+        example: |
+          +-- Mission Control ---------------------------------+
+          |                                                    |
+          |  [ panel content here ]                            |
+          |                                                    |
+          +----------------------------------------------------+
+
+      # ----------------------------------------------------------------------
+      # 4. FocusablePanel
+      # ----------------------------------------------------------------------
+      - name: FocusablePanel
+        id: focusable_panel
+        description: >
+          Panel with focus state tracking. When focused, the border color
+          changes to moonlit_violet and the title becomes bold. Wraps a
+          standard Panel and adds a focused boolean prop. Integrates with
+          the bubbles.key keybinding system for Tab/Shift+Tab navigation.
+        charm_base: "lipgloss.NewStyle().Border(lipgloss.RoundedBorder())"
+        props:
+          - name: title
+            type: string
+            description: "Panel title"
+          - name: focused
+            type: bool
+            description: "Whether this panel currently has focus"
+          - name: content
+            type: "tea.Model"
+            description: "Inner content model"
+          - name: border_color_default
+            type: string
+            default: "blue"
+            description: "Border color when not focused"
+          - name: border_color_focused
+            type: string
+            default: "moonlit_violet"
+            description: "Border color when focused"
+          - name: width
+            type: int
+            description: "Panel width"
+          - name: height
+            type: int
+            description: "Panel height"
+        variants:
+          - name: unfocused
+            description: "Default state -- standard border color"
+            border_color: blue
+            title_style: "normal"
+          - name: focused
+            description: "Active focus -- highlighted border + bold title"
+            border_color: moonlit_violet
+            title_style: "bold"
+        tokens_used:
+          - blue
+          - moonlit_violet
+          - butterscotch
+          - space_white
+          - focus_ring
+        example: |
+          UNFOCUSED:
+          +-- Mission Control ---------------------------------+
+          |  [ content ]                                       |
+          +----------------------------------------------------+
+
+          FOCUSED:
+          +== Mission Control =================================+
+          |  [ content ]                                       |
+          +====================================================+
+          (border rendered in moonlit_violet, title bold)
+
+      # ----------------------------------------------------------------------
+      # 5. ModalOverlay
+      # ----------------------------------------------------------------------
+      - name: ModalOverlay
+        id: modal_overlay
+        description: >
+          Centered overlay rendered on top of the existing screen content
+          using lipgloss.Place for absolute positioning. Uses a
+          DoubleBorder to visually distinguish from regular panels.
+          The background behind the modal is dimmed by rendering the
+          existing content with reduced opacity/dim styling.
+        charm_base: "lipgloss.Place + lipgloss.NewStyle().Border(lipgloss.DoubleBorder())"
+        props:
+          - name: title
+            type: string
+            description: "Modal title in top border"
+          - name: content
+            type: "tea.Model"
+            description: "Modal body content"
+          - name: width
+            type: int
+            description: "Modal width in columns"
+          - name: height
+            type: int
+            description: "Modal height in rows"
+          - name: border_color
+            type: string
+            default: "gold"
+            description: "Border color for the modal"
+          - name: dismissable
+            type: bool
+            default: true
+            description: "Whether Escape key closes the modal"
+        variants:
+          - name: standard
+            description: "Default gold-bordered modal"
+            border_color: gold
+          - name: alert
+            description: "Red alert modal for critical actions"
+            border_color: red_alert
+          - name: question
+            description: "Ice-bordered modal for Admiral questions"
+            border_color: ice
+        tokens_used:
+          - gold
+          - red_alert
+          - ice
+          - space_white
+          - bg_modal
+          - modal_padding_x
+          - modal_padding_y
+        example: |
+          (dimmed background)
+          :::::::::::::::::::::::::::::::::::::::::::::::::::
+          ::                                               ::
+          ::  +== Admiral Question ========================+  ::
+          ::  ||                                          ||  ::
+          ::  ||  How should auth tokens be stored?       ||  ::
+          ::  ||                                          ||  ::
+          ::  ||  > [1] JWT in httpOnly cookie            ||  ::
+          ::  ||    [2] Session tokens in Redis           ||  ::
+          ::  ||    [3] Other (explain below)             ||  ::
+          ::  ||                                          ||  ::
+          ::  +==========================================+  ::
+          ::                                               ::
+          :::::::::::::::::::::::::::::::::::::::::::::::::::
+
+  # ==========================================================================
+  # STATUS & INDICATORS
+  # ==========================================================================
+  - name: status_indicators
+    description: "Visual status feedback components"
+    components:
+
+      # ----------------------------------------------------------------------
+      # 6. StatusBadge
+      # ----------------------------------------------------------------------
+      - name: StatusBadge
+        id: status_badge
+        description: >
+          A colored icon paired with a text label indicating a state.
+          Uses lipgloss styling for color and bold/dim formatting.
+          Always pairs icon + text for accessibility (never color alone).
+        charm_base: "lipgloss.NewStyle()"
+        props:
+          - name: status
+            type: "string"
+            description: "Status key: running, done, waiting, skipped, failed, stuck, halted, planning, review"
+          - name: label
+            type: string
+            description: "Human-readable label (e.g. RUNNING, DONE, HALTED)"
+          - name: show_icon
+            type: bool
+            default: true
+            description: "Whether to show the status icon"
+          - name: bold
+            type: bool
+            default: false
+            description: "Whether the label text is bold"
+        variants:
+          - name: running
+            icon: "\u25CF"
+            color: butterscotch
+            label: "RUNNING"
+          - name: done
+            icon: "\u2713"
+            color: green_ok
+            label: "DONE"
+          - name: waiting
+            icon: "\u23F8"
+            color: blue
+            label: "WAITING"
+          - name: skipped
+            icon: "\u2298"
+            color: galaxy_gray
+            label: "SKIPPED"
+          - name: failed
+            icon: "\u2717"
+            color: red_alert
+            label: "FAILED"
+          - name: stuck
+            icon: "\u25CF"
+            color: yellow_caution
+            label: "STUCK"
+          - name: halted
+            icon: "\u2717"
+            color: red_alert
+            label: "HALTED"
+          - name: planning
+            icon: "\u25CF"
+            color: purple
+            label: "PLANNING"
+          - name: review
+            icon: "\u25CF"
+            color: purple
+            label: "REVIEW"
+          - name: approved
+            icon: "\u2713"
+            color: green_ok
+            label: "APPROVED"
+        tokens_used:
+          - butterscotch
+          - green_ok
+          - blue
+          - galaxy_gray
+          - red_alert
+          - yellow_caution
+          - purple
+          - space_white
+        example: |
+          RUNNING variant:   * RUNNING     (butterscotch)
+          DONE variant:      # DONE        (green)
+          FAILED variant:    x FAILED      (red)
+          WAITING variant:   || WAITING    (blue)
+          STUCK variant:     * STUCK       (yellow)
+
+      # ----------------------------------------------------------------------
+      # 7. HealthBar
+      # ----------------------------------------------------------------------
+      - name: HealthBar
+        id: health_bar
+        description: >
+          5-dot health indicator showing system health as filled vs empty
+          circles. Color shifts from green (healthy) through yellow (degraded)
+          to red (critical) based on the health value. Pure lipgloss styling.
+        charm_base: "lipgloss.NewStyle()"
+        props:
+          - name: health
+            type: int
+            description: "Health value 0-100, mapped to 0-5 filled dots"
+          - name: status
+            type: string
+            description: "Derived status: ok (4-5 dots), warning (2-3 dots), critical (0-1 dots)"
+          - name: show_label
+            type: bool
+            default: true
+            description: "Show percentage label after dots"
+        variants:
+          - name: ok
+            description: "4-5 filled dots, green color"
+            color: green_ok
+          - name: warning
+            description: "2-3 filled dots, yellow color"
+            color: yellow_caution
+          - name: critical
+            description: "0-1 filled dots, red color"
+            color: red_alert
+        tokens_used:
+          - green_ok
+          - yellow_caution
+          - red_alert
+          - galaxy_gray
+          - space_white
+        example: |
+          OK:       ***** 100%    (green filled dots, no empties)
+          GOOD:     ****o  80%    (green, 4 filled 1 empty)
+          WARNING:  ***oo  60%    (yellow, 3 filled 2 empty)
+          DEGRADED: **ooo  40%    (yellow, 2 filled 3 empty)
+          CRITICAL: *oooo  20%    (red, 1 filled 4 empty)
+          DOWN:     ooooo   0%    (red, all empty)
+
+      # ----------------------------------------------------------------------
+      # 8. PhaseIndicator
+      # ----------------------------------------------------------------------
+      - name: PhaseIndicator
+        id: phase_indicator
+        description: >
+          Shows the current TDD phase in the 6-phase cycle:
+          RED -> VERIFY_RED -> GREEN -> VERIFY_GREEN -> REFACTOR -> VERIFY_REFACTOR.
+          The current phase is highlighted (bold + butterscotch), completed
+          phases are dimmed green, and future phases are dimmed gray.
+          Pure lipgloss text styling.
+        charm_base: "lipgloss.NewStyle()"
+        props:
+          - name: current_phase
+            type: string
+            description: "Current TDD phase: red, verify_red, green, verify_green, refactor, verify_refactor"
+          - name: phases_completed
+            type: "[]string"
+            description: "List of completed phase names"
+          - name: compact
+            type: bool
+            default: false
+            description: "If true, show abbreviated phase names (R/VR/G/VG/RF/VRF)"
+        variants:
+          - name: full
+            description: "Full phase names with arrows"
+          - name: compact
+            description: "Abbreviated single-letter phase names"
+        tokens_used:
+          - butterscotch
+          - green_ok
+          - galaxy_gray
+          - space_white
+        example: |
+          FULL (current=GREEN):
+          RED -> VERIFY_RED -> GREEN -> VERIFY_GREEN -> REFACTOR -> VERIFY_REFACTOR
+          (dim)   (dim)       (BOLD)    (gray)          (gray)       (gray)
+
+          COMPACT (current=GREEN):
+          R > VR > G > VG > RF > VRF
+                   ^
+                (bold butterscotch)
+
+      # ----------------------------------------------------------------------
+      # 9. WaveProgressBar
+      # ----------------------------------------------------------------------
+      - name: WaveProgressBar
+        id: wave_progress_bar
+        description: >
+          Progress bar for a single execution wave showing missions
+          completed out of total. Wraps bubbles.progress with a gradient
+          fill from butterscotch to gold. Displays "Wave N: [bar] X/Y done"
+          format.
+        charm_base: "bubbles.progress"
+        props:
+          - name: wave_number
+            type: int
+            description: "Wave number (1, 2, 3, ...)"
+          - name: completed
+            type: int
+            description: "Number of completed missions in this wave"
+          - name: total
+            type: int
+            description: "Total missions in this wave"
+          - name: width
+            type: int
+            default: 20
+            description: "Width of the progress bar in columns"
+          - name: gradient_start
+            type: string
+            default: "butterscotch"
+            description: "Gradient start color"
+          - name: gradient_end
+            type: string
+            default: "gold"
+            description: "Gradient end color"
+        variants:
+          - name: active
+            description: "Currently executing wave -- animated fill"
+            gradient_start: butterscotch
+            gradient_end: gold
+          - name: complete
+            description: "Fully complete wave -- solid green"
+            color: green_ok
+          - name: pending
+            description: "Not yet started -- dim gray"
+            color: galaxy_gray
+        tokens_used:
+          - butterscotch
+          - gold
+          - green_ok
+          - galaxy_gray
+          - space_white
+        example: |
+          Wave 1: [##########..........] 2/4 done   (butterscotch->gold gradient)
+          Wave 2: [####################] 4/4 done   (solid green)
+          Wave 3: [....................] 0/3 done   (dim gray)
+
+      # ----------------------------------------------------------------------
+      # 10. ElapsedTimer
+      # ----------------------------------------------------------------------
+      - name: ElapsedTimer
+        id: elapsed_timer
+        description: >
+          Count-up timer showing elapsed time for a mission or agent session.
+          Wraps bubbles.stopwatch for accurate time tracking with the Bubble
+          Tea event loop. Displays in HH:MM:SS or MM:SS format depending on
+          duration. Color shifts to yellow_caution after a configurable
+          warning threshold.
+        charm_base: "bubbles.stopwatch"
+        props:
+          - name: running
+            type: bool
+            description: "Whether the stopwatch is currently running"
+          - name: elapsed
+            type: "time.Duration"
+            description: "Current elapsed duration"
+          - name: warning_threshold
+            type: "time.Duration"
+            default: "5m"
+            description: "Duration after which color shifts to yellow_caution"
+          - name: format
+            type: string
+            default: "auto"
+            description: "auto (picks MM:SS or HH:MM:SS), short (MM:SS always), long (HH:MM:SS always)"
+          - name: label
+            type: string
+            default: ""
+            description: "Optional label prefix (e.g. 'Elapsed:')"
+        variants:
+          - name: normal
+            description: "Under warning threshold -- light_gray text"
+            color: light_gray
+          - name: warning
+            description: "Over warning threshold -- yellow caution text"
+            color: yellow_caution
+          - name: stopped
+            description: "Timer stopped -- galaxy_gray dim text"
+            color: galaxy_gray
+        tokens_used:
+          - light_gray
+          - yellow_caution
+          - galaxy_gray
+        example: |
+          Normal:   00:03:12     (light gray)
+          Warning:  05:42:01     (yellow caution, over 5m threshold)
+          Stopped:  00:01:15     (dim gray, stopped)
+          Labeled:  Elapsed: 00:03:12
+
+  # ==========================================================================
+  # DATA DISPLAY
+  # ==========================================================================
+  - name: data_display
+    description: "Components for displaying agent, mission, and event data"
+    components:
+
+      # ----------------------------------------------------------------------
+      # 11. AgentCard
+      # ----------------------------------------------------------------------
+      - name: AgentCard
+        id: agent_card
+        description: >
+          Single row displaying an active agent with its role, assigned
+          mission, current TDD phase, elapsed time, and harness type.
+          Pure lipgloss rendering. Each field is color-coded by its
+          semantic meaning.
+        charm_base: "lipgloss.NewStyle()"
+        props:
+          - name: agent_id
+            type: string
+            description: "Agent identifier (e.g. impl-abc123), truncated to 10 chars"
+          - name: role
+            type: string
+            description: "Agent role: captain, commander, design_officer, implementer, reviewer"
+          - name: mission_id
+            type: string
+            description: "Assigned mission ID (e.g. MISSION-42)"
+          - name: phase
+            type: string
+            description: "Current TDD phase or agent status"
+          - name: status
+            type: string
+            description: "Agent status: running, done, stuck, idle, dead"
+          - name: elapsed
+            type: "time.Duration"
+            description: "Time since agent started"
+          - name: harness
+            type: string
+            description: "Harness type: claude, codex"
+          - name: selected
+            type: bool
+            default: false
+            description: "Whether this card is currently selected/highlighted"
+        variants:
+          - name: running
+            description: "Agent actively working"
+            status_color: butterscotch
+            icon: "\u25B8"
+          - name: done
+            description: "Agent completed its work"
+            status_color: green_ok
+            icon: "\u2713"
+          - name: stuck
+            description: "Agent timed out or erroring"
+            status_color: yellow_caution
+            icon: "\u26A0"
+          - name: dead
+            description: "Agent process died"
+            status_color: red_alert
+            icon: "\u2717"
+          - name: idle
+            description: "Agent waiting for work"
+            status_color: galaxy_gray
+            icon: "\u23F8"
+        tokens_used:
+          - butterscotch
+          - green_ok
+          - yellow_caution
+          - red_alert
+          - galaxy_gray
+          - blue
+          - purple
+          - space_white
+          - light_gray
+          - moonlit_violet
+        example: |
+          RUNNING:
+          > impl-abc  [MISSION-42]  implementer  GREEN   00:03:12  claude
+            (orange)  (dim)         (blue)       (bold)  (gray)    (dim)
+
+          STUCK:
+          ! cmdr-def  [MISSION-07]  commander    RED     05:42:01  codex
+            (yellow)  (dim)         (blue)       (bold)  (yellow)  (dim)
+
+          SELECTED (reverse video highlight):
+          [ > impl-abc  [MISSION-42]  implementer  GREEN  00:03:12  claude ]
+            (moonlit violet background strip)
+
+      # ----------------------------------------------------------------------
+      # 12. AgentGrid
+      # ----------------------------------------------------------------------
+      - name: AgentGrid
+        id: agent_grid
+        description: >
+          Scrollable, filterable list of AgentCards. Wraps bubbles.list
+          with custom item rendering via AgentCard. Supports keyboard
+          navigation (j/k or arrow keys), filtering by role or status,
+          and a spinner when agents are loading.
+        charm_base: "bubbles.list"
+        props:
+          - name: agents
+            type: "[]AgentCardProps"
+            description: "List of agent data to render as AgentCards"
+          - name: filter_role
+            type: string
+            default: ""
+            description: "Filter by role (empty = show all)"
+          - name: filter_status
+            type: string
+            default: ""
+            description: "Filter by status (empty = show all)"
+          - name: selected_index
+            type: int
+            description: "Currently selected agent index"
+          - name: height
+            type: int
+            description: "Visible height in rows (scrolls if list exceeds)"
+          - name: show_title
+            type: bool
+            default: true
+            description: "Show 'Active Agents (N)' title"
+          - name: show_filter
+            type: bool
+            default: true
+            description: "Show the filter input from bubbles.list"
+        variants:
+          - name: default
+            description: "Standard list with all agents"
+          - name: compact
+            description: "Compact mode -- fewer fields per agent row"
+          - name: loading
+            description: "Shows bubbles.spinner while agents are loading"
+            spinner: "bubbles.spinner"
+        tokens_used:
+          - butterscotch
+          - blue
+          - space_white
+          - moonlit_violet
+        example: |
+          Active Agents (3)
+          > impl-abc  [MISSION-42]  implementer  GREEN   00:03:12  claude
+            cmdr-def  [MISSION-07]  commander    RED     00:01:45  claude
+            rev-ghi   [MISSION-42]  reviewer     REVIEW  00:00:30  codex
+
+          (arrow keys to navigate, / to filter, Enter for detail)
+
+      # ----------------------------------------------------------------------
+      # 13. MissionBoard
+      # ----------------------------------------------------------------------
+      - name: MissionBoard
+        id: mission_board
+        description: >
+          Kanban-style board with five columns: Backlog (B), In Progress (IP),
+          Review (R), Done (D), Halted (H). Each column displays a count
+          and optionally expands to show MissionCards. Layout uses
+          lipgloss.JoinHorizontal for columns and lipgloss.JoinVertical
+          for cards within each column. Expanded columns use bubbles.paginator
+          when card count exceeds visible height.
+        charm_base: "lipgloss.JoinHorizontal + lipgloss.JoinVertical + bubbles.paginator"
+        props:
+          - name: columns
+            type: "map[string][]MissionCardProps"
+            description: "Map of column name to mission cards: backlog, in_progress, review, done, halted"
+          - name: expanded
+            type: bool
+            default: false
+            description: "If false, show only summary counts (B:2 IP:3 R:1 D:5 H:0). If true, show full cards."
+          - name: selected_column
+            type: string
+            default: ""
+            description: "Currently focused column for keyboard nav"
+          - name: selected_index
+            type: int
+            default: 0
+            description: "Selected card index within the focused column"
+          - name: width
+            type: int
+            description: "Available width for the board"
+        variants:
+          - name: summary
+            description: "Collapsed -- one-line count summary"
+          - name: expanded
+            description: "Full Kanban board with cards in columns"
+        tokens_used:
+          - blue
+          - butterscotch
+          - purple
+          - green_ok
+          - red_alert
+          - space_white
+          - galaxy_gray
+        example: |
+          SUMMARY:
+          B:2  IP:3  R:1  D:5  H:0
+          (bl) (org) (pur)(grn)(red)
+
+          EXPANDED:
+          | Backlog(2)    | In Progress(3)  | Review(1)    | Done(5)     | Halted(0)  |
+          |               |                 |              |             |            |
+          | MISSION-11    | MISSION-42  >   | MISSION-07   | MISSION-01  |            |
+          |   wave:1      |   GREEN         |   APPROVED   | MISSION-02  |            |
+          |   infra       |   00:03:12      |              | MISSION-03  |            |
+          |               |                 |              | MISSION-04  |            |
+          | MISSION-12    | MISSION-43      |              | MISSION-05  |            |
+          |   wave:1      |   RED           |              |             |            |
+          |   feature     |   00:01:45      |              |             |            |
+          |               |                 |              |             |            |
+          |               | MISSION-44      |              |             |            |
+          |               |   VERIFY_GREEN  |              |             |            |
+          |               |   00:00:30      |              |             |            |
+
+      # ----------------------------------------------------------------------
+      # 14. MissionCard
+      # ----------------------------------------------------------------------
+      - name: MissionCard
+        id: mission_card
+        description: >
+          Single mission within a Kanban column. Shows mission ID, wave,
+          classification, current phase, and elapsed time. Pure lipgloss
+          rendering with semantic colors based on mission status.
+        charm_base: "lipgloss.NewStyle()"
+        props:
+          - name: mission_id
+            type: string
+            description: "Mission identifier (e.g. MISSION-42)"
+          - name: title
+            type: string
+            description: "Mission title (truncated to fit column width)"
+          - name: wave
+            type: int
+            description: "Wave number"
+          - name: classification
+            type: string
+            description: "RED_ALERT or STANDARD_OPS"
+          - name: status
+            type: string
+            description: "Mission status: backlog, in_progress, review, done, halted"
+          - name: phase
+            type: string
+            description: "Current TDD phase (if in_progress)"
+          - name: elapsed
+            type: "time.Duration"
+            description: "Time in current status"
+          - name: ac_progress
+            type: string
+            description: "AC completion fraction (e.g. '3/5')"
+          - name: selected
+            type: bool
+            default: false
+        variants:
+          - name: standard_ops
+            description: "Normal priority mission"
+            border_color: blue
+          - name: red_alert
+            description: "Critical priority mission"
+            border_color: red_alert
+          - name: halted
+            description: "Halted mission -- dimmed with red indicator"
+            border_color: red_alert
+        tokens_used:
+          - blue
+          - red_alert
+          - butterscotch
+          - green_ok
+          - space_white
+          - light_gray
+          - galaxy_gray
+          - moonlit_violet
+        example: |
+          STANDARD_OPS:
+          MISSION-42
+            wave:2  STANDARD_OPS
+            GREEN  AC:3/5  00:03:12
+
+          RED_ALERT:
+          MISSION-07
+            wave:1  RED_ALERT
+            RED  AC:1/3  05:42:01
+
+      # ----------------------------------------------------------------------
+      # 15. EventLog
+      # ----------------------------------------------------------------------
+      - name: EventLog
+        id: event_log
+        description: >
+          Scrollable, filterable event list using bubbles.viewport for
+          the scroll region. Each line is an EventRow. Supports severity
+          filtering (INFO, WARN, ERROR), auto-scroll to bottom on new
+          events (can be paused), and mouse wheel scrolling.
+        charm_base: "bubbles.viewport"
+        props:
+          - name: events
+            type: "[]EventRowProps"
+            description: "List of event log entries"
+          - name: max_lines
+            type: int
+            default: 12
+            description: "Visible lines in the viewport"
+          - name: auto_scroll
+            type: bool
+            default: true
+            description: "Auto-scroll to newest events"
+          - name: severity_filter
+            type: "[]string"
+            default: '["INFO","WARN","ERROR"]'
+            description: "Which severity levels to display"
+          - name: width
+            type: int
+            description: "Available width"
+        variants:
+          - name: default
+            description: "All severity levels shown"
+          - name: errors_only
+            description: "Only ERROR and WARN events"
+          - name: paused
+            description: "Auto-scroll disabled, manual scrolling"
+        tokens_used:
+          - blue
+          - yellow_caution
+          - red_alert
+          - space_white
+          - light_gray
+          - galaxy_gray
+        example: |
+          +-- Engineering Logs -----------------------------------------+
+          | [INFO]  propulsion.dispatch wave=2 mission=MISSION-42       |
+          | [INFO]  agent.started agent=impl-abc mission=MISSION-42     |
+          | [WARN]  doctor.stuck agent=cmdr-def timeout=300s            |
+          | [ERROR] gate.result mission=MISSION-07 gate=lint class=FAIL |
+          | [INFO]  agent.done agent=impl-abc mission=MISSION-42        |
+          | [INFO]  state.transition MISSION-42 in_progress -> review   |
+          +-------------------------------------------------------------+
+          (Page Up/Down to scroll, f to filter)
+
+      # ----------------------------------------------------------------------
+      # 16. EventRow
+      # ----------------------------------------------------------------------
+      - name: EventRow
+        id: event_row
+        description: >
+          Single log entry with severity-colored tag, timestamp, event
+          type, and detail text. Pure lipgloss styling. Severity
+          determines the tag color: INFO=blue, WARN=yellow, ERROR=red.
+        charm_base: "lipgloss.NewStyle()"
+        props:
+          - name: severity
+            type: string
+            description: "INFO, WARN, or ERROR"
+          - name: timestamp
+            type: string
+            description: "HH:MM:SS timestamp"
+          - name: event_type
+            type: string
+            description: "Event type (e.g. gate.result, agent.started)"
+          - name: message
+            type: string
+            description: "Event detail text"
+          - name: mission_id
+            type: string
+            default: ""
+            description: "Associated mission ID if any"
+        variants:
+          - name: info
+            description: "Informational event"
+            tag_color: blue
+          - name: warn
+            description: "Warning event"
+            tag_color: yellow_caution
+          - name: error
+            description: "Error event"
+            tag_color: red_alert
+        tokens_used:
+          - blue
+          - yellow_caution
+          - red_alert
+          - space_white
+          - light_gray
+          - galaxy_gray
+        example: |
+          [INFO]  14:30:05  agent.started agent=impl-abc mission=MISSION-42
+          (blue)  (gray)    (white)       (dim detail text)
+
+          [WARN]  14:32:17  doctor.stuck agent=cmdr-def timeout=300s
+          (yel)   (gray)    (white)      (dim detail text)
+
+          [ERROR] 14:35:42  gate.result mission=MISSION-07 gate=lint FAIL
+          (red)   (gray)    (white)     (dim detail text)
+
+      # ----------------------------------------------------------------------
+      # 17. DependencyGraph
+      # ----------------------------------------------------------------------
+      - name: DependencyGraph
+        id: dependency_graph
+        description: >
+          ASCII tree visualization of waves and their missions with
+          dependency edges. Renders wave headers, tree branches (using
+          box-drawing characters), mission IDs with classification labels,
+          and dependency lines. Pure lipgloss rendering.
+        charm_base: "lipgloss.NewStyle()"
+        props:
+          - name: waves
+            type: "[]WaveData"
+            description: "Ordered list of waves with their missions and dependencies"
+          - name: highlight_wave
+            type: int
+            default: -1
+            description: "Wave number to highlight as current (-1 = none)"
+          - name: show_status
+            type: bool
+            default: true
+            description: "Show mission status icons next to IDs"
+          - name: width
+            type: int
+            description: "Available width for the tree"
+        variants:
+          - name: default
+            description: "Full tree with dependencies shown"
+          - name: compact
+            description: "Wave headers + mission IDs only, no dependency lines"
+        tokens_used:
+          - blue
+          - butterscotch
+          - purple
+          - green_ok
+          - galaxy_gray
+          - space_white
+          - light_gray
+        example: |
+          Wave 1:                         (bold blue, highlighted)
+          +-- MISSION-01 (infra) #        (butterscotch ID, purple type, green done)
+          +-- MISSION-02 (feature) *      (butterscotch ID, purple type, orange running)
+
+          Wave 2:                         (bold blue)
+          +-- MISSION-03 (feature) ||     (waiting)
+          |   +-- dep: MISSION-01         (dim gray dependency)
+          |   +-- dep: MISSION-02         (dim gray dependency)
+          +-- MISSION-04 (infra) ||
+              +-- dep: MISSION-01
+
+          Wave 3:
+          +-- MISSION-05 (feature) ...
+              +-- dep: MISSION-03
+              +-- dep: MISSION-04
+
+      # ----------------------------------------------------------------------
+      # 18. CoverageMatrix
+      # ----------------------------------------------------------------------
+      - name: CoverageMatrix
+        id: coverage_matrix
+        description: >
+          Table mapping use cases to missions for validation. Uses
+          bubbles.table for structured column/row navigation with
+          keyboard support. Columns: UC ID, Mapped Missions, Coverage
+          Status.
+        charm_base: "bubbles.table"
+        props:
+          - name: rows
+            type: "[]CoverageRow"
+            description: "List of use case -> mission mappings"
+          - name: show_gaps_only
+            type: bool
+            default: false
+            description: "Filter to show only uncovered or partially covered UCs"
+          - name: width
+            type: int
+            description: "Available width"
+          - name: height
+            type: int
+            description: "Available height for the table"
+        variants:
+          - name: full
+            description: "All use cases shown"
+          - name: gaps_only
+            description: "Only uncovered or partially covered rows"
+        tokens_used:
+          - green_ok
+          - yellow_caution
+          - red_alert
+          - space_white
+          - light_gray
+          - blue
+        example: |
+          +---------------+----------------------+--------+
+          | Use Case      | Missions             | Status |
+          +---------------+----------------------+--------+
+          | UC-INTAKE-01  | MISSION-01, MISSION-02 | # cov  |
+          | UC-ROLES-02   | MISSION-01             | # cov  |
+          | UC-ANALYZE-01 | MISSION-01, MISSION-02 | # cov  |
+          | UC-TUI-01     |                        | x gap  |
+          | UC-SETTINGS-03| MISSION-05             | ! part |
+          +---------------+----------------------+--------+
+          (# = green covered, x = red gap, ! = yellow partial)
+
+      # ----------------------------------------------------------------------
+      # 19. GateResultRow
+      # ----------------------------------------------------------------------
+      - name: GateResultRow
+        id: gate_result_row
+        description: >
+          Single gate verification result showing gate type (typecheck, lint,
+          test, build), classification (accept/reject), and a status icon.
+          Pure lipgloss rendering. Used in mission detail views and the
+          PhaseIndicator context.
+        charm_base: "lipgloss.NewStyle()"
+        props:
+          - name: gate_type
+            type: string
+            description: "Gate type: typecheck, lint, test, build"
+          - name: classification
+            type: string
+            description: "Gate result: accept, reject_syntax, reject_logic, reject_timeout, running, skipped"
+          - name: exit_code
+            type: int
+            description: "Shell command exit code"
+          - name: summary
+            type: string
+            default: ""
+            description: "One-line summary of gate output"
+          - name: duration
+            type: "time.Duration"
+            description: "How long the gate took to run"
+        variants:
+          - name: accept
+            description: "Gate passed"
+            icon: "\u2713"
+            color: green_ok
+          - name: reject
+            description: "Gate failed"
+            icon: "\u2717"
+            color: red_alert
+          - name: running
+            description: "Gate currently executing"
+            icon: "\u25B8"
+            color: butterscotch
+          - name: skipped
+            description: "Gate was skipped"
+            icon: "\u2298"
+            color: galaxy_gray
+        tokens_used:
+          - green_ok
+          - red_alert
+          - butterscotch
+          - galaxy_gray
+          - space_white
+          - light_gray
+        example: |
+          # Typecheck    accept    0    0.8s      (green check + text)
+          # Lint         accept    0    1.2s      (green check)
+          x Test         reject    1    3.5s  "2 tests failed"  (red cross)
+          > Build        running   -    ...       (orange arrow)
+          o Lint         skipped   -    -         (gray circle)
+
+  # ==========================================================================
+  # FORMS & INPUT
+  # ==========================================================================
+  - name: forms_input
+    description: "Interactive input components -- ALL use Charm Huh library"
+    components:
+
+      # ----------------------------------------------------------------------
+      # 20. CommandBar
+      # ----------------------------------------------------------------------
+      - name: CommandBar
+        id: command_bar
+        description: >
+          Operator command input at the bottom of the screen. Wraps
+          huh.Input for single-line text entry with prompt character,
+          inline validation, and command history. Displays help text
+          below the input showing available commands.
+        charm_base: "huh.Input"
+        props:
+          - name: prompt
+            type: string
+            default: "> "
+            description: "Prompt string displayed before input"
+          - name: placeholder
+            type: string
+            default: "Type a command..."
+            description: "Placeholder text when input is empty"
+          - name: value
+            type: string
+            description: "Current input value"
+          - name: help_text
+            type: string
+            default: "halt | retry | approve | status | wave | quit  [Tab] panels  [?] help"
+            description: "Help text shown below the input"
+          - name: feedback
+            type: string
+            default: ""
+            description: "Last command result message"
+          - name: feedback_type
+            type: string
+            default: "info"
+            description: "Feedback severity: success, error, info"
+          - name: history
+            type: "[]string"
+            description: "Command history for Up/Down arrow cycling"
+          - name: width
+            type: int
+            description: "Available width"
+        variants:
+          - name: idle
+            description: "Waiting for input, no feedback"
+          - name: success
+            description: "Last command succeeded -- green feedback"
+          - name: error
+            description: "Last command failed -- red feedback"
+        tokens_used:
+          - butterscotch
+          - green_ok
+          - red_alert
+          - space_white
+          - light_gray
+          - galaxy_gray
+        example: |
+          IDLE:
+          > _
+          halt | retry | approve | status | wave | quit  [Tab] panels  [?] help
+
+          SUCCESS:
+          # Approved MISSION-42
+          > _
+          halt | retry | approve | status | wave | quit  [Tab] panels  [?] help
+
+          ERROR:
+          x Unknown command: foobar
+          > _
+          halt | retry | approve | status | wave | quit  [Tab] panels  [?] help
+
+      # ----------------------------------------------------------------------
+      # 21. AdmiralQuestionForm
+      # ----------------------------------------------------------------------
+      - name: AdmiralQuestionForm
+        id: admiral_question_form
+        description: >
+          Full modal form for agent-to-Admiral questions. Presented inside
+          a ModalOverlay. Uses huh.Form grouping huh.Note for question
+          context display, huh.Select for predefined options, huh.Input
+          for free-text answer, and huh.Confirm for broadcast toggle.
+          The form supports keyboard navigation between fields.
+        charm_base: "huh.Form (huh.Note + huh.Select + huh.Input + huh.Confirm)"
+        props:
+          - name: question
+            type: string
+            description: "The question text from the agent"
+          - name: asking_agent
+            type: string
+            description: "Agent ID that asked the question"
+          - name: mission_id
+            type: string
+            description: "Mission context for the question"
+          - name: options
+            type: "[]string"
+            description: "Predefined answer options for huh.Select"
+          - name: allow_free_text
+            type: bool
+            default: true
+            description: "Whether to show the free-text huh.Input field"
+          - name: allow_broadcast
+            type: bool
+            default: true
+            description: "Whether to show the broadcast huh.Confirm toggle"
+        variants:
+          - name: with_options
+            description: "Question with predefined options + optional free text"
+          - name: free_text_only
+            description: "Question with only free text input"
+        tokens_used:
+          - ice
+          - butterscotch
+          - gold
+          - space_white
+          - light_gray
+          - moonlit_violet
+        example: |
+          +== Admiral Question ======================================+
+          ||                                                        ||
+          ||  Agent impl-abc asks (MISSION-42):                     ||
+          ||                                                        ||
+          ||  "How should auth tokens be stored?"                   ||
+          ||                                                        ||
+          ||  Select an option:                                     ||
+          ||  > [1] JWT in httpOnly cookie                          ||
+          ||    [2] Session tokens in Redis                         ||
+          ||    [3] Other (explain below)                           ||
+          ||                                                        ||
+          ||  Additional context:                                   ||
+          ||  [ Type free text here...                         ]    ||
+          ||                                                        ||
+          ||  Broadcast to all agents? [y/N]                        ||
+          ||                                                        ||
+          ||  [Enter] Submit    [Esc] Dismiss                       ||
+          ||                                                        ||
+          +========================================================+
+
+      # ----------------------------------------------------------------------
+      # 22. PlanApprovalForm
+      # ----------------------------------------------------------------------
+      - name: PlanApprovalForm
+        id: plan_approval_form
+        description: >
+          Form for approving, providing feedback on, or shelving a mission
+          plan. Presented inside a ModalOverlay. Uses huh.Note for plan
+          summary display, huh.Select for the action choice
+          (approve/feedback/shelve), and huh.Text (multi-line) for feedback
+          text when the feedback option is selected.
+        charm_base: "huh.Form (huh.Note + huh.Select + huh.Text)"
+        props:
+          - name: plan_summary
+            type: string
+            description: "Summary of the plan being reviewed"
+          - name: mission_count
+            type: int
+            description: "Number of missions in the plan"
+          - name: wave_count
+            type: int
+            description: "Number of waves"
+          - name: coverage_percent
+            type: int
+            description: "UC coverage percentage"
+          - name: iteration
+            type: int
+            description: "Current planning iteration number"
+          - name: max_iterations
+            type: int
+            description: "Maximum allowed iterations"
+        variants:
+          - name: first_review
+            description: "First iteration -- all options available"
+          - name: revision
+            description: "Subsequent iteration -- shows iteration count"
+          - name: final
+            description: "Last allowed iteration -- approve or shelve only"
+        tokens_used:
+          - gold
+          - butterscotch
+          - green_ok
+          - red_alert
+          - space_white
+          - light_gray
+          - purple
+        example: |
+          +== Plan Review (Iteration 2/5) ==========================+
+          ||                                                        ||
+          ||  Plan Summary:                                         ||
+          ||  12 missions in 3 waves | UC Coverage: 100%            ||
+          ||                                                        ||
+          ||  Action:                                               ||
+          ||  > [a] Approve -- create missions and begin execution  ||
+          ||    [f] Feedback -- request revision with notes         ||
+          ||    [s] Shelve -- save plan for later                   ||
+          ||                                                        ||
+          ||  Feedback (if selected):                               ||
+          ||  +--------------------------------------------------+  ||
+          ||  | Split MISSION-03 into two smaller missions.      |  ||
+          ||  | Auth and DB setup should be separate.            |  ||
+          ||  +--------------------------------------------------+  ||
+          ||                                                        ||
+          ||  [Enter] Submit    [Esc] Cancel                        ||
+          ||                                                        ||
+          +========================================================+
+
+      # ----------------------------------------------------------------------
+      # 23. ConfirmDialog
+      # ----------------------------------------------------------------------
+      - name: ConfirmDialog
+        id: confirm_dialog
+        description: >
+          Destructive action confirmation dialog. Uses huh.Confirm inside
+          a ModalOverlay with alert styling (red border). Shows action
+          description and consequence text before the yes/no prompt.
+        charm_base: "huh.Confirm"
+        props:
+          - name: title
+            type: string
+            description: "Dialog title (e.g. 'Halt Mission')"
+          - name: message
+            type: string
+            description: "Description of what will happen"
+          - name: consequence
+            type: string
+            description: "Consequence text (e.g. 'Agent will be terminated. Worktree preserved.')"
+          - name: confirm_label
+            type: string
+            default: "Yes"
+            description: "Label for the confirm action"
+          - name: cancel_label
+            type: string
+            default: "No"
+            description: "Label for the cancel action"
+          - name: destructive
+            type: bool
+            default: true
+            description: "If true, uses red_alert border. If false, uses gold border."
+        variants:
+          - name: destructive
+            description: "Red-bordered confirmation for destructive actions"
+            border_color: red_alert
+          - name: standard
+            description: "Gold-bordered confirmation for non-destructive actions"
+            border_color: gold
+        tokens_used:
+          - red_alert
+          - gold
+          - space_white
+          - light_gray
+          - yellow_caution
+        example: |
+          +== Halt Mission =========================================+
+          ||                                                        ||
+          ||  Halt MISSION-42?                                      ||
+          ||                                                        ||
+          ||  Agent impl-abc will be terminated.                    ||
+          ||  Worktree will be preserved at:                        ||
+          ||  .beads/worktrees/MISSION-42                           ||
+          ||                                                        ||
+          ||  Halt mission?  [y/N]                                  ||
+          ||                                                        ||
+          +========================================================+
+          (red border for destructive action)
+
+  # ==========================================================================
+  # PLANNING-SPECIFIC
+  # ==========================================================================
+  - name: planning
+    description: "Components specific to the Ready Room / planning phase"
+    components:
+
+      # ----------------------------------------------------------------------
+      # 24. SpecialistCard
+      # ----------------------------------------------------------------------
+      - name: SpecialistCard
+        id: specialist_card
+        description: >
+          Displays a single specialist agent session during the Ready Room
+          planning phase. Shows specialist name/role, status, assigned
+          harness, elapsed time, and a truncated output snippet. Pure
+          lipgloss rendering inside a bordered sub-panel.
+        charm_base: "lipgloss.NewStyle().Border(lipgloss.RoundedBorder())"
+        props:
+          - name: name
+            type: string
+            description: "Specialist name (e.g. Captain, Commander, Design Officer)"
+          - name: title
+            type: string
+            description: "Specialist role description (e.g. 'Triage', 'Technical', 'UX')"
+          - name: status
+            type: string
+            description: "Status: working, done, waiting, skipped, failed"
+          - name: harness
+            type: string
+            description: "Harness type (e.g. claude, codex)"
+          - name: model
+            type: string
+            description: "Model name (e.g. opus, sonnet)"
+          - name: elapsed
+            type: "time.Duration"
+            description: "Time since specialist started"
+          - name: output_snippet
+            type: string
+            description: "Last line(s) of specialist output, truncated"
+          - name: note
+            type: string
+            default: ""
+            description: "Auxiliary note (e.g. 'No UI use cases detected')"
+          - name: width
+            type: int
+            description: "Card width"
+        variants:
+          - name: working
+            description: "Specialist actively processing"
+            border_color: butterscotch
+            status_icon: "\u25CF"
+          - name: done
+            description: "Specialist completed"
+            border_color: green_ok
+            status_icon: "\u2713"
+          - name: waiting
+            description: "Specialist waiting for others"
+            border_color: blue
+            status_icon: "\u23F8"
+          - name: skipped
+            description: "Specialist not needed"
+            border_color: galaxy_gray
+            status_icon: "\u2298"
+          - name: failed
+            description: "Specialist errored out"
+            border_color: red_alert
+            status_icon: "\u2717"
+        tokens_used:
+          - butterscotch
+          - green_ok
+          - blue
+          - galaxy_gray
+          - red_alert
+          - space_white
+          - light_gray
+          - purple
+        example: |
+          +-- Captain (Triage) --------------------------------+
+          | Status: # DONE                                     |
+          | Harness: claude (opus)                              |
+          | Elapsed: 00:00:45                                   |
+          | Output: "PRD complete, all specialists needed"      |
+          +----------------------------------------------------+
+
+          +-- Design Officer (UX) -----------------------------+
+          | Status: o SKIPPED                                   |
+          | Note: "No UI use cases detected"                    |
+          +----------------------------------------------------+
+
+      # ----------------------------------------------------------------------
+      # 25. SpecialistGrid
+      # ----------------------------------------------------------------------
+      - name: SpecialistGrid
+        id: specialist_grid
+        description: >
+          Grid layout of SpecialistCards during the Ready Room planning
+          phase. Uses lipgloss.JoinHorizontal to arrange cards side by
+          side (typically 2-4 specialists). Falls back to vertical
+          stacking in compact mode.
+        charm_base: "lipgloss.JoinHorizontal"
+        props:
+          - name: specialists
+            type: "[]SpecialistCardProps"
+            description: "List of specialist data to render"
+          - name: columns
+            type: int
+            default: 2
+            description: "Number of columns (2 for standard, 1 for compact)"
+          - name: width
+            type: int
+            description: "Available width"
+          - name: height
+            type: int
+            description: "Available height"
+        variants:
+          - name: horizontal
+            description: "Side-by-side card layout (wide terminals)"
+          - name: stacked
+            description: "Vertical card layout (narrow terminals)"
+        tokens_used:
+          - butterscotch
+          - blue
+          - space_white
+        example: |
+          +-- Captain (Triage) ---------+  +-- Commander (Technical) ----+
+          | Status: # DONE              |  | Status: * WORKING...        |
+          | Harness: claude (opus)      |  | Harness: claude (sonnet)    |
+          | Elapsed: 00:00:45           |  | Elapsed: 00:01:32           |
+          | Output: "PRD complete..."   |  | Output: "Identifying..."    |
+          +-----------------------------+  +-----------------------------+
+
+          +-- Design Officer (UX) ------+  +-- Synthesizer -----------+
+          | Status: o SKIPPED           |  | Status: || WAITING        |
+          | Note: "No UI use cases"     |  | Note: "Awaiting outputs"  |
+          +-----------------------------+  +---------------------------+
+
+      # ----------------------------------------------------------------------
+      # 26. SignoffTracker
+      # ----------------------------------------------------------------------
+      - name: SignoffTracker
+        id: signoff_tracker
+        description: >
+          Per-mission sign-off progress showing which specialist roles
+          have completed their review/analysis. Displays a horizontal
+          list of role names with status icons. Pure lipgloss rendering.
+        charm_base: "lipgloss.NewStyle()"
+        props:
+          - name: mission_id
+            type: string
+            description: "Mission being signed off"
+          - name: signoffs
+            type: "[]SignoffEntry"
+            description: "List of role + status pairs"
+          - name: compact
+            type: bool
+            default: false
+            description: "Compact mode: abbreviate role names"
+        variants:
+          - name: default
+            description: "Full role names with icons"
+          - name: compact
+            description: "Abbreviated role names"
+        tokens_used:
+          - green_ok
+          - butterscotch
+          - blue
+          - galaxy_gray
+          - space_white
+        example: |
+          DEFAULT:
+          MISSION-42 Signoff:  Captain # | Commander * | Design || | Review ...
+
+          COMPACT:
+          MISSION-42:  Cpt# Cmd* Des|| Rev...
+
+          (# = done/green, * = working/orange, || = waiting/blue, ... = pending/gray)
+
+      # ----------------------------------------------------------------------
+      # 27. PlanningIterationBadge
+      # ----------------------------------------------------------------------
+      - name: PlanningIterationBadge
+        id: planning_iteration_badge
+        description: >
+          Simple badge showing current planning iteration number out of
+          the maximum allowed. Highlights in yellow_caution when approaching
+          the limit. Pure lipgloss styled text.
+        charm_base: "lipgloss.NewStyle()"
+        props:
+          - name: current
+            type: int
+            description: "Current iteration number"
+          - name: max
+            type: int
+            description: "Maximum allowed iterations"
+        variants:
+          - name: normal
+            description: "Well under the limit"
+            color: blue
+          - name: approaching
+            description: "At max-1 iteration"
+            color: yellow_caution
+          - name: final
+            description: "At max iteration (last chance)"
+            color: red_alert
+        tokens_used:
+          - blue
+          - yellow_caution
+          - red_alert
+          - space_white
+        example: |
+          NORMAL:     Iteration 1/5     (blue)
+          APPROACHING: Iteration 4/5    (yellow)
+          FINAL:      Iteration 5/5     (red)
+
+  # ==========================================================================
+  # NAVIGATION
+  # ==========================================================================
+  - name: navigation
+    description: "Navigation and wayfinding components"
+    components:
+
+      # ----------------------------------------------------------------------
+      # 28. HeaderBar
+      # ----------------------------------------------------------------------
+      - name: HeaderBar
+        id: header_bar
+        description: >
+          Top-level header bar showing the application title, project name,
+          system health (HealthBar), and current mode indicator. Pure
+          lipgloss rendering. Fixed at 1-2 rows height. Uses
+          lipgloss.JoinHorizontal to space elements across the full width.
+        charm_base: "lipgloss.JoinHorizontal + lipgloss.NewStyle()"
+        props:
+          - name: app_title
+            type: string
+            default: "SHIP COMMANDER"
+            description: "Application title"
+          - name: project_name
+            type: string
+            description: "Current project name"
+          - name: health
+            type: int
+            description: "System health 0-100 for HealthBar"
+          - name: mode
+            type: string
+            description: "Current mode: PLANNING, EXECUTING, REVIEW, IDLE"
+          - name: mission_summary
+            type: string
+            default: ""
+            description: "Optional summary like 'Missions: 3/8'"
+          - name: width
+            type: int
+            description: "Full terminal width"
+        variants:
+          - name: planning
+            description: "Planning mode header"
+            mode_color: purple
+          - name: executing
+            description: "Execution mode header"
+            mode_color: butterscotch
+          - name: review
+            description: "Review mode header"
+            mode_color: blue
+          - name: idle
+            description: "Idle / no active commission"
+            mode_color: galaxy_gray
+        tokens_used:
+          - butterscotch
+          - blue
+          - purple
+          - galaxy_gray
+          - gold
+          - space_white
+          - green_ok
+          - yellow_caution
+          - red_alert
+        example: |
+          SHIP COMMANDER | myproject | ***** 100% | EXECUTING | Missions: 5/8
+          (gold bold)      (white)    (HealthBar)  (orange)    (dim)
+
+          SHIP COMMANDER | auth-system | ***oo 60% | PLANNING
+          (gold bold)      (white)      (yellow)    (purple)
+
+      # ----------------------------------------------------------------------
+      # 29. HelpOverlay
+      # ----------------------------------------------------------------------
+      - name: HelpOverlay
+        id: help_overlay
+        description: >
+          Keyboard shortcut help screen triggered by pressing '?'. Wraps
+          bubbles.help which auto-generates help text from registered
+          keybindings (bubbles.key). Displayed inside a ModalOverlay.
+          Groups shortcuts by context (Global, Navigation, Actions).
+        charm_base: "bubbles.help + bubbles.key"
+        props:
+          - name: keybindings
+            type: "[]key.Binding"
+            description: "Registered keybindings from bubbles.key"
+          - name: context
+            type: string
+            default: "global"
+            description: "Current context for filtering relevant shortcuts"
+          - name: show_all
+            type: bool
+            default: false
+            description: "Show all keybindings vs. just context-relevant ones"
+          - name: width
+            type: int
+            description: "Modal width"
+        variants:
+          - name: short
+            description: "Compact single-line help (shown in footer)"
+          - name: full
+            description: "Full help overlay modal with grouped shortcuts"
+        tokens_used:
+          - ice
+          - butterscotch
+          - space_white
+          - light_gray
+          - galaxy_gray
+        example: |
+          +== Keyboard Shortcuts ===================================+
+          ||                                                        ||
+          ||  GLOBAL                                                ||
+          ||  Tab / Shift+Tab    Cycle panel focus                  ||
+          ||  ?                  Toggle this help                   ||
+          ||  q                  Quit                               ||
+          ||  Ctrl+C             Force quit                         ||
+          ||                                                        ||
+          ||  NAVIGATION                                            ||
+          ||  Enter              Drill down / Select                ||
+          ||  Escape             Go back / Cancel                   ||
+          ||  Up/Down or j/k     Navigate list items                ||
+          ||  Page Up/Down       Scroll logs                        ||
+          ||                                                        ||
+          ||  ACTIONS                                               ||
+          ||  a                  Approve                            ||
+          ||  h                  Halt mission                       ||
+          ||  r                  Retry mission                      ||
+          ||  w                  Wave manager                       ||
+          ||  Space              Pause/resume execution             ||
+          ||                                                        ||
+          ||  [?] Close    [Esc] Close                              ||
+          ||                                                        ||
+          +========================================================+
+
+      # ----------------------------------------------------------------------
+      # 30. BreadcrumbNav
+      # ----------------------------------------------------------------------
+      - name: BreadcrumbNav
+        id: breadcrumb_nav
+        description: >
+          Navigation breadcrumb trail for drill-down views. Shows the
+          path from the top-level view to the current detail view.
+          Each segment is clickable (via keyboard: number keys) to
+          navigate back. Pure lipgloss rendering.
+        charm_base: "lipgloss.NewStyle()"
+        props:
+          - name: segments
+            type: "[]BreadcrumbSegment"
+            description: "Ordered list of navigation segments"
+          - name: separator
+            type: string
+            default: " > "
+            description: "Separator between segments"
+          - name: max_segments
+            type: int
+            default: 5
+            description: "Maximum segments to show (truncates middle with ...)"
+        variants:
+          - name: default
+            description: "Standard breadcrumb trail"
+          - name: compact
+            description: "Shows only current + parent (for narrow terminals)"
+        tokens_used:
+          - butterscotch
+          - blue
+          - space_white
+          - light_gray
+          - galaxy_gray
+        example: |
+          DEFAULT:
+          Ship Bridge > Mission Board > MISSION-42 > Gate Results
+          (blue link)   (blue link)     (blue link)   (white current)
+
+          COMPACT:
+          ... > MISSION-42 > Gate Results
+          (gray) (blue)       (white)
+
+  # ==========================================================================
+  # NAVIGABLE TOOLBAR & NEW COMPONENTS
+  # ==========================================================================
+  - name: toolbar_and_new
+    description: "NavigableToolbar and components added during the declutter redesign"
+    components:
+
+      # ----------------------------------------------------------------------
+      # 31. NavigableToolbar
+      # ----------------------------------------------------------------------
+      - name: NavigableToolbar
+        id: navigable_toolbar
+        description: >
+          Bottom-of-screen wayfinding toolbar replacing the old CommandBar on
+          all views. Renders a row of labeled shortcut buttons that serve as
+          the user's "where can I go?" bar. Each button shows a key in brackets
+          followed by a label. Buttons are activatable two ways:
+          1. Press the shortcut key directly (e.g., 'n' for New)
+          2. Arrow Left/Right to highlight a button, Enter to activate
+          Like Midnight Commander or htop's bottom bar. The currently
+          highlighted button has a moonlit_violet background. When no button
+          is highlighted (default state), shortcut keys still work normally.
+          Pure lipgloss rendering with bubbles.key for keybinding registration.
+        charm_base: "lipgloss.JoinHorizontal + lipgloss.NewStyle() + bubbles.key"
+        props:
+          - name: buttons
+            type: "[]ToolbarButton"
+            description: >
+              Ordered list of toolbar buttons. Each has: key (string, e.g. "n"),
+              label (string, e.g. "New"), action (func or tea.Cmd), enabled (bool).
+              Disabled buttons are rendered in galaxy_gray.
+          - name: highlighted_index
+            type: int
+            default: -1
+            description: >
+              Index of the currently highlighted button (-1 = none highlighted,
+              shortcut keys still work). Set by Left/Right arrow navigation.
+          - name: width
+            type: int
+            description: "Full terminal width for layout"
+          - name: separator
+            type: string
+            default: "  "
+            description: "Separator between buttons (typically 2 spaces)"
+        variants:
+          - name: default
+            description: "No button highlighted, keys work directly"
+            highlighted_index: -1
+          - name: navigating
+            description: "A button is highlighted via arrow keys"
+            highlighted_index: ">= 0"
+        tokens_used:
+          - butterscotch
+          - moonlit_violet
+          - galaxy_gray
+          - space_white
+          - bg_primary
+        example: |
+          DEFAULT (no highlight):
+          [n] New  [d] Directive  [r] Roster  [i] Inbox  [?] Help  [q] Quit
+          (butterscotch keys, space_white labels, bg_primary background)
+
+          NAVIGATING (Roster highlighted):
+          [n] New  [d] Directive  [r] Roster  [i] Inbox  [?] Help  [q] Quit
+                                  ^^^^^^^^^
+                       (moonlit_violet background on highlighted button)
+
+          DISABLED BUTTON:
+          [n] New  [d] Directive  [l] Launch  [?] Help  [Esc] Fleet
+                                  ^^^^^^^^^^
+                       (galaxy_gray text, not activatable)
+
+      # ----------------------------------------------------------------------
+      # 32. ShipStatusRow
+      # ----------------------------------------------------------------------
+      - name: ShipStatusRow
+        id: ship_status_row
+        description: >
+          Compact single-line representation of a ship for the Fleet Monitor
+          view. Shows all key ship metrics on one row: status icon, ship name,
+          directive title (truncated), crew count, wave progress (compact bar),
+          mission progress (done/total), and health dots. Pure lipgloss
+          rendering. Selected row highlighted with moonlit_violet background.
+        charm_base: "lipgloss.NewStyle()"
+        props:
+          - name: ship_name
+            type: string
+            description: "Ship name (bold butterscotch)"
+          - name: directive_title
+            type: string
+            description: "Directive title (blue, truncated to fit)"
+          - name: status
+            type: string
+            description: "Ship status: LAUNCHED, COMPLETE, HALTED"
+          - name: crew_count
+            type: int
+            description: "Number of crew members"
+          - name: wave_current
+            type: int
+            description: "Current wave number"
+          - name: wave_total
+            type: int
+            description: "Total wave count"
+          - name: missions_done
+            type: int
+            description: "Completed missions"
+          - name: missions_total
+            type: int
+            description: "Total missions"
+          - name: health
+            type: int
+            description: "Health 0-100 for compact HealthBar"
+          - name: has_stuck
+            type: bool
+            description: "Whether ship has stuck agents"
+          - name: pending_questions
+            type: int
+            description: "Number of pending Admiral questions"
+          - name: selected
+            type: bool
+            default: false
+            description: "Whether this row is selected"
+          - name: width
+            type: int
+            description: "Available row width"
+        variants:
+          - name: launched
+            description: "Ship actively executing"
+            status_color: butterscotch
+          - name: complete
+            description: "All missions done"
+            status_color: green_ok
+          - name: has_issues
+            description: "Ship has stuck agents or halted missions"
+            status_color: yellow_caution
+        tokens_used:
+          - butterscotch
+          - green_ok
+          - yellow_caution
+          - red_alert
+          - blue
+          - galaxy_gray
+          - space_white
+          - moonlit_violet
+          - pink
+        example: |
+          LAUNCHED:
+          > USS Discovery    Auth System      Crew:4  Wave 2/3 [####....] 8/12  *****
+            (orange icon)    (blue, trunc)    (dim)   (dim)    (bar)     (dim)  (green)
+
+          HAS_ISSUES (stuck agent):
+          ! USS Defiant      Payment API      Crew:3  Wave 1/2 [##......] 3/8   ***oo
+            (yellow icon)    (blue)           (dim)   (dim)    (bar)     (dim)  (yellow)
+
+          SELECTED:
+          [ > USS Discovery    Auth System    Crew:4  Wave 2/3 [####....] 8/12  ***** ]
+            (moonlit_violet background strip)
+
+      # ----------------------------------------------------------------------
+      # 33. ACPhaseDetail
+      # ----------------------------------------------------------------------
+      - name: ACPhaseDetail
+        id: ac_phase_detail
+        description: >
+          Detailed per-acceptance-criterion TDD phase tracker. Absorbed from
+          the removed Ship Bridge tactical row into the Mission Detail view.
+          Shows a scrollable list of ACs, each with a 6-dot phase pipeline,
+          inline gate results, and attempt counts. This is the deep-dive
+          component for understanding where a mission is in its TDD cycle.
+          Uses lipgloss for the pipeline rendering and bubbles.list for
+          scrollable selection.
+        charm_base: "lipgloss.NewStyle() + bubbles.list"
+        props:
+          - name: acceptance_criteria
+            type: "[]ACPhaseData"
+            description: >
+              List of ACs with phase state. Each has: ac_index (int),
+              ac_title (string), current_phase (string), phases_completed
+              ([]string), attempt_count (int), gate_results ([]GateResult).
+          - name: selected_index
+            type: int
+            default: 0
+            description: "Currently selected AC for detail expansion"
+          - name: height
+            type: int
+            description: "Available height for the list"
+          - name: width
+            type: int
+            description: "Available width"
+        variants:
+          - name: default
+            description: "Full pipeline with 6 phase dots per AC"
+          - name: compact
+            description: "Abbreviated: current phase name only"
+        tokens_used:
+          - butterscotch
+          - green_ok
+          - red_alert
+          - galaxy_gray
+          - space_white
+          - moonlit_violet
+          - blue
+        example: |
+          AC-1: User can log in with email
+          [*] RED  [*] VR  [>] GREEN  [ ] VG  [ ] RF  [ ] VRF   Attempt: 1
+          (grn)    (grn)   (orng/pulse) (gray) (gray)  (gray)
+
+          AC-2: Password reset sends email
+          [*] RED  [x] VR  [ ] GREEN  [ ] VG  [ ] RF  [ ] VRF   Attempt: 2
+          (grn)    (red)   (gray)     (gray)  (gray)  (gray)
+                   ^ gate: test FAIL (exit 1) "expected email sent"
+
+          AC-3: OAuth2 Google login
+          [ ] RED  [ ] VR  [ ] GREEN  [ ] VG  [ ] RF  [ ] VRF   Pending
+          (gray)   (gray)  (gray)     (gray)  (gray)  (gray)
+
+      # 34. SettingsTabs
+      # ----------------------------------------------------------------------
+      - name: SettingsTabs
+        id: settings_tabs
+        description: >
+          Tabbed panel for Project Settings view. Four tabs: Verification Gates,
+          Crew Defaults, Fleet Defaults, Export/Import. Tab headers are
+          navigable with Left/Right arrows or number keys [1]-[4]. Each tab
+          contains a scrollable form or list. Uses lipgloss for tab header
+          styling and huh for all input fields.
+        charm_base: "lipgloss.JoinVertical + lipgloss.JoinHorizontal + huh.Form"
+        props:
+          - name: active_tab
+            type: int
+            default: 0
+            description: "Index of the currently active tab (0-3)"
+          - name: gate_commands
+            type: "[]GateCommand"
+            description: >
+              List of configured gate commands. Each has: name (string, e.g.
+              "test_command"), label (string, e.g. "Test Suite"), command
+              (string, the bash command), enabled (bool).
+          - name: crew_defaults
+            type: CrewDefaults
+            description: "Harness, model, WIP limit, max revisions, timeouts"
+          - name: fleet_defaults
+            type: FleetDefaults
+            description: "Ship naming, wave strategy, merge policy"
+          - name: width
+            type: int
+          - name: height
+            type: int
+        variants:
+          - name: default
+            description: "Full tabbed layout with all fields"
+          - name: compact
+            description: "Tabs abbreviated, fields stack vertically"
+        tokens_used:
+          - butterscotch
+          - moonlit_violet
+          - galaxy_gray
+          - space_white
+          - bg_primary
+        example: |
+          [Gates]  Crew  Fleet  Export
+          ─────────────────────────────
+          test_command:       go test ./...           [Edit] [x]
+          typecheck_command:  go vet ./...            [Edit] [x]
+          lint_command:       golangci-lint run       [Edit] [x]
+          build_command:      go build ./...          [Edit] [x]
+                                            [+ Add Gate Command]
+
+      # 35. GateCommandEditor
+      # ----------------------------------------------------------------------
+      - name: GateCommandEditor
+        id: gate_command_editor
+        description: >
+          Inline editor for a single verification gate command. Shows the
+          gate name, the bash command string, and edit/delete controls.
+          Editing opens a Huh Input with the command string. These are
+          just bash commands -- no language-specific logic. Variable
+          substitution ({test_file}, {worktree_dir}, {mission_id}) is
+          documented inline.
+        charm_base: "lipgloss.NewStyle() + huh.Input"
+        props:
+          - name: gate_name
+            type: string
+            description: "Gate identifier (e.g., 'test_command', 'lint_command')"
+          - name: gate_label
+            type: string
+            description: "Human-readable label (e.g., 'Test Suite')"
+          - name: command
+            type: string
+            description: "The bash command string"
+          - name: enabled
+            type: bool
+            default: true
+            description: "Whether this gate is active"
+          - name: editing
+            type: bool
+            default: false
+            description: "Whether the command is currently being edited"
+          - name: width
+            type: int
+        variants:
+          - name: display
+            description: "Read-only display of gate name + command"
+          - name: editing
+            description: "Huh Input active for command editing"
+          - name: disabled
+            description: "Faint styling, gate skipped during verification"
+        tokens_used:
+          - butterscotch
+          - galaxy_gray
+          - space_white
+          - green_ok
+          - red_alert
+        example: |
+          test_command:  go test ./...  [Edit] [x]
+          (editing mode):
+          test_command:  [go test -v -count=1 ./...        ]  [Save] [Cancel]
+
+  # ==========================================================================
+  # ADDITIONAL BUBBLES-BACKED COMPONENTS
+  # ==========================================================================
+  - name: bubbles_backed
+    description: "Components that wrap previously unused Bubbles primitives"
+    components:
+
+      # ----------------------------------------------------------------------
+      # 31. LoadingSpinner
+      # ----------------------------------------------------------------------
+      - name: LoadingSpinner
+        id: loading_spinner
+        description: >
+          Reusable spinner for any loading state. Wraps bubbles.spinner
+          with configurable spinner style (dot, line, minidot, jump, pulse,
+          points, globe, moon, monkey, meter). Used inside AgentGrid loading
+          variant, SpecialistCard working state, and gate execution.
+        charm_base: "bubbles.spinner"
+        props:
+          - name: title
+            type: string
+            default: ""
+            description: "Text displayed next to the spinner"
+          - name: style
+            type: string
+            default: "dot"
+            description: "Spinner style from bubbles.spinner catalog"
+          - name: color
+            type: string
+            default: "butterscotch"
+            description: "Spinner color token"
+        variants:
+          - name: default
+            description: "Standard spinner for general loading"
+            style: "dot"
+            color: butterscotch
+          - name: gate
+            description: "Spinner shown during gate execution"
+            style: "meter"
+            color: blue
+          - name: planning
+            description: "Spinner shown during planning agent work"
+            style: "moon"
+            color: purple
+        tokens_used:
+          - butterscotch
+          - blue
+          - purple
+          - space_white
+        example: |
+          DEFAULT:   * Loading agents...     (butterscotch, dot spinner)
+          GATE:      [|||] Running tests...  (blue, meter spinner)
+          PLANNING:  🌙 Captain analyzing...  (purple, moon spinner)
+
+      # ----------------------------------------------------------------------
+      # 32. GateCountdown
+      # ----------------------------------------------------------------------
+      - name: GateCountdown
+        id: gate_countdown
+        description: >
+          Countdown timer for gate execution timeout. Wraps bubbles.timer
+          with configurable duration. Color shifts from blue to yellow_caution
+          at 75% elapsed, to red_alert at 90% elapsed. Emits timeout event
+          when countdown reaches zero.
+        charm_base: "bubbles.timer"
+        props:
+          - name: duration
+            type: "time.Duration"
+            default: "120s"
+            description: "Total countdown duration (matches gate timeout config)"
+          - name: gate_type
+            type: string
+            description: "Gate being timed: test, typecheck, lint, build"
+          - name: mission_id
+            type: string
+            description: "Mission this gate belongs to"
+          - name: warn_threshold
+            type: float64
+            default: 0.75
+            description: "Fraction of duration at which color shifts to yellow"
+          - name: critical_threshold
+            type: float64
+            default: 0.90
+            description: "Fraction of duration at which color shifts to red"
+        variants:
+          - name: normal
+            description: "Under warn threshold"
+            color: blue
+          - name: warning
+            description: "Between warn and critical thresholds"
+            color: yellow_caution
+          - name: critical
+            description: "Over critical threshold, gate may timeout"
+            color: red_alert
+          - name: expired
+            description: "Countdown reached zero"
+            color: red_alert
+        tokens_used:
+          - blue
+          - yellow_caution
+          - red_alert
+          - space_white
+          - light_gray
+        example: |
+          NORMAL:   test gate  01:42 remaining   (blue)
+          WARNING:  test gate  00:28 remaining   (yellow, > 75% elapsed)
+          CRITICAL: test gate  00:08 remaining   (red, > 90% elapsed)
+          EXPIRED:  test gate  TIMEOUT            (red, bold)
+
+      # ----------------------------------------------------------------------
+      # 33. PRDFilePicker
+      # ----------------------------------------------------------------------
+      - name: PRDFilePicker
+        id: prd_file_picker
+        description: >
+          File browser for selecting a PRD markdown file when creating
+          a commission. Wraps huh.FilePicker (which wraps bubbles.filepicker)
+          for form-consistent theming, validation, and keyboard navigation.
+          Shown inside a ModalOverlay when the Admiral initiates a new
+          commission without specifying a file path.
+        charm_base: "huh.FilePicker"
+        props:
+          - name: current_directory
+            type: string
+            default: "."
+            description: "Starting directory for file browsing"
+          - name: allowed_extensions
+            type: "[]string"
+            default: '["md"]'
+            description: "File extensions to show (filters out non-markdown)"
+          - name: height
+            type: int
+            default: 15
+            description: "Visible rows in the file list"
+          - name: show_hidden
+            type: bool
+            default: false
+            description: "Whether to show hidden files/directories"
+        variants:
+          - name: default
+            description: "Standard file picker for markdown files"
+          - name: recent
+            description: "Shows recently used PRD files first (from Beads history)"
+        tokens_used:
+          - butterscotch
+          - blue
+          - space_white
+          - light_gray
+          - galaxy_gray
+          - moonlit_violet
+        example: |
+          +== Select PRD File ======================================+
+          ||                                                        ||
+          ||  /Users/dev/projects/myapp                             ||
+          ||                                                        ||
+          ||    ../                                                  ||
+          ||    .spec/                                               ||
+          ||  > prd.md                          (highlighted)       ||
+          ||    requirements.md                                      ||
+          ||    design-notes.md                                      ||
+          ||                                                        ||
+          ||  [Enter] Select    [Esc] Cancel    [/] Filter          ||
+          ||                                                        ||
+          +========================================================+
+
+      # ----------------------------------------------------------------------
+      # 34. OutputViewport
+      # ----------------------------------------------------------------------
+      - name: OutputViewport
+        id: output_viewport
+        description: >
+          Scrollable viewport for displaying agent output captured from
+          tmux capture-pane. Wraps bubbles.viewport with auto-scroll,
+          line wrapping, and ANSI color preservation. Used in agent-detail
+          drill-down views.
+        charm_base: "bubbles.viewport"
+        props:
+          - name: content
+            type: string
+            description: "Raw output text (may contain ANSI escape codes)"
+          - name: width
+            type: int
+            description: "Viewport width"
+          - name: height
+            type: int
+            description: "Viewport height"
+          - name: auto_scroll
+            type: bool
+            default: true
+            description: "Auto-scroll to bottom on new content"
+          - name: wrap
+            type: bool
+            default: true
+            description: "Wrap long lines"
+          - name: title
+            type: string
+            default: "Agent Output"
+            description: "Viewport title"
+        variants:
+          - name: live
+            description: "Auto-scrolling, agent still running"
+            border_color: butterscotch
+          - name: frozen
+            description: "Agent finished, scrollable history"
+            border_color: galaxy_gray
+        tokens_used:
+          - butterscotch
+          - galaxy_gray
+          - space_white
+          - light_gray
+        example: |
+          +-- Agent Output (live) --------------------------------+
+          | $ go test ./internal/gate/...                          |
+          | --- FAIL: TestVerifyRed (0.02s)                        |
+          |     gate_test.go:45: expected exit code 1, got 0       |
+          | FAIL                                                   |
+          | exit status 1                                          |
+          |                                                 [AUTO] |
+          +---------------------------------------------------------+
+          (Page Up/Down to scroll, Space to toggle auto-scroll)
+
+      # ----------------------------------------------------------------------
+      # 35. GateEvidenceTable
+      # ----------------------------------------------------------------------
+      - name: GateEvidenceTable
+        id: gate_evidence_table
+        description: >
+          Table of all gate execution results for a mission or AC. Wraps
+          bubbles.table with columns: Gate, Phase, Result, Exit Code,
+          Duration, Attempt. Keyboard navigable with Enter to drill into
+          full gate output. Replaces the list-of-GateResultRows pattern
+          with a proper table component.
+        charm_base: "bubbles.table"
+        props:
+          - name: rows
+            type: "[]GateEvidence"
+            description: "Gate result rows to display"
+          - name: columns
+            type: "[]string"
+            default: '["Gate", "Phase", "Result", "Exit", "Duration", "Attempt"]'
+            description: "Column headers"
+          - name: width
+            type: int
+            description: "Available width"
+          - name: height
+            type: int
+            description: "Available height for the table"
+          - name: selected_row
+            type: int
+            default: 0
+            description: "Currently highlighted row"
+        variants:
+          - name: default
+            description: "Full table with all columns"
+          - name: compact
+            description: "Gate + Result + Duration only"
+        tokens_used:
+          - green_ok
+          - red_alert
+          - butterscotch
+          - galaxy_gray
+          - space_white
+          - blue
+        example: |
+          +--------+---------+---------+------+-------+---------+
+          | Gate   | Phase   | Result  | Exit | Time  | Attempt |
+          +--------+---------+---------+------+-------+---------+
+          | test   | RED     | # PASS  |    1 | 2.1s  | 1       |
+          | test   | GREEN   | x FAIL  |    1 | 3.5s  | 1       |
+          | test   | GREEN   | # PASS  |    0 | 3.2s  | 2       |
+          | test   | REFAC   | # PASS  |    0 | 3.1s  | 1       |
+          | lint   | IMPL    | # PASS  |    0 | 1.2s  | 1       |
+          +--------+---------+---------+------+-------+---------+
+          (j/k navigate, Enter for full output)
+
+  # ==========================================================================
+  # HUH FORM COMPONENTS (additional)
+  # ==========================================================================
+  - name: huh_forms
+    description: "Additional Huh-backed form components for complete library coverage"
+    components:
+
+      # ----------------------------------------------------------------------
+      # 36. BatchActionSelector
+      # ----------------------------------------------------------------------
+      - name: BatchActionSelector
+        id: batch_action_selector
+        description: >
+          Multi-select form for batch operations on missions or agents.
+          Wraps huh.MultiSelect inside a ModalOverlay. Used for batch
+          halt, batch retry, batch approve, and wave-level merge selection.
+          Each item shows mission/agent ID with status badge.
+        charm_base: "huh.Form (huh.MultiSelect + huh.Confirm)"
+        props:
+          - name: items
+            type: "[]SelectableItem"
+            description: "List of items to select from (missions or agents)"
+          - name: action
+            type: string
+            description: "Action to perform: halt, retry, approve, merge"
+          - name: min_selections
+            type: int
+            default: 1
+            description: "Minimum number of items that must be selected"
+          - name: max_selections
+            type: int
+            default: 0
+            description: "Maximum selections (0 = unlimited)"
+          - name: preselected
+            type: "[]string"
+            description: "IDs of items pre-selected by default"
+        variants:
+          - name: missions
+            description: "Select multiple missions for batch action"
+          - name: agents
+            description: "Select multiple agents for batch action"
+          - name: wave_merge
+            description: "Select completed missions to batch-merge"
+        tokens_used:
+          - butterscotch
+          - gold
+          - green_ok
+          - red_alert
+          - space_white
+          - light_gray
+          - moonlit_violet
+        example: |
+          +== Batch Halt Missions ================================+
+          ||                                                      ||
+          ||  Select missions to halt:                            ||
+          ||                                                      ||
+          ||  [x] MISSION-42  * RUNNING   impl-abc  00:03:12     ||
+          ||  [x] MISSION-43  * RUNNING   impl-def  00:01:45     ||
+          ||  [ ] MISSION-44  * RUNNING   rev-ghi   00:00:30     ||
+          ||  [ ] MISSION-07  ! STUCK     cmdr-jkl  05:42:01     ||
+          ||                                                      ||
+          ||  Halt 2 selected missions? [y/N]                     ||
+          ||                                                      ||
+          ||  [Space] Toggle  [a] All  [Enter] Confirm  [Esc] Cancel  ||
+          ||                                                      ||
+          +======================================================+
+
+# ============================================================================
+# ANIMATION BINDINGS (Harmonica Spring Map)
+# ============================================================================
+# Maps component events to animation presets defined in tokens.yaml.
+# Implementation: each binding creates a harmonica.NewSpring() instance
+# that drives the animated property via tea.Tick at 60 FPS.
+#
+# Spring presets (from tokens.yaml):
+#   view_switch:       freq=8.0,  ratio=1.0  (critically-damped, snappy)
+#   modal_open:        freq=6.0,  ratio=0.8  (under-damped, gentle bounce)
+#   modal_close:       freq=10.0, ratio=1.0  (critically-damped, fast dismiss)
+#   alert_pulse:       freq=4.0,  ratio=0.3  (under-damped, oscillating)
+#   progress_smooth:   freq=5.0,  ratio=1.2  (over-damped, no overshoot)
+#   spinner_bounce:    freq=6.0,  ratio=0.6  (under-damped, playful)
+#
+# Star Trek themed presets:
+#   warp_engage:       freq=12.0, ratio=0.4  (dramatic stretch + snap)
+#   warp_decelerate:   freq=6.0,  ratio=1.0  (smooth arrival from warp)
+#   beam_materialize:  freq=5.0,  ratio=0.7  (transporter shimmer in)
+#   beam_dematerialize: freq=7.0, ratio=0.7  (transporter shimmer out)
+#   red_alert_klaxon:  freq=3.0,  ratio=0.15 (sustained red oscillation)
+#   shields_up:        freq=8.0,  ratio=0.5  (bright ripple flash)
+
+animation_map:
+
+  # -- Layout transitions -----------------------------------------------------
+  - component: ModalOverlay
+    events:
+      - event: open
+        preset: modal_open
+        property: opacity
+        from: 0.0
+        to: 1.0
+        description: "Modal fades in with gentle bounce on appearance"
+      - event: close
+        preset: modal_close
+        property: opacity
+        from: 1.0
+        to: 0.0
+        description: "Modal fades out crisply, no lingering"
+      - event: open
+        preset: modal_open
+        property: scale
+        from: 0.9
+        to: 1.0
+        description: "Modal scales up slightly on entrance for depth effect"
+
+  - component: FocusablePanel
+    events:
+      - event: focus_gained
+        preset: view_switch
+        property: border_color_lerp
+        from: 0.0
+        to: 1.0
+        description: "Border color springs from default to moonlit_violet on focus"
+      - event: focus_lost
+        preset: view_switch
+        property: border_color_lerp
+        from: 1.0
+        to: 0.0
+        description: "Border color springs back to default on blur"
+
+  # -- Status & indicator animations -------------------------------------------
+  - component: StatusBadge
+    events:
+      - event: status_change
+        preset: view_switch
+        property: color_lerp
+        from: 0.0
+        to: 1.0
+        description: "Color springs from old status color to new on change"
+
+  - component: HealthBar
+    events:
+      - event: value_change
+        preset: progress_smooth
+        property: filled_dots
+        from: "previous_value"
+        to: "new_value"
+        description: "Dot fill count smoothly animates between health values"
+
+  - component: PhaseIndicator
+    events:
+      - event: phase_advance
+        preset: view_switch
+        property: highlight_position
+        from: "previous_phase_index"
+        to: "new_phase_index"
+        description: "Highlight snaps to new phase position with spring physics"
+
+  - component: WaveProgressBar
+    events:
+      - event: progress_update
+        preset: progress_smooth
+        property: fill_percent
+        from: "previous_percent"
+        to: "new_percent"
+        description: "Bar fill smoothly approaches new completion value"
+
+  - component: ElapsedTimer
+    events:
+      - event: threshold_crossed
+        preset: alert_pulse
+        property: color_intensity
+        from: 0.5
+        to: 1.0
+        description: "Brief pulse when crossing warning threshold"
+
+  # -- Data display animations -------------------------------------------------
+  - component: AgentCard
+    events:
+      - event: status_to_stuck
+        preset: alert_pulse
+        property: border_flash
+        from: 0.0
+        to: 1.0
+        description: "Card border pulses yellow when agent becomes stuck"
+      - event: status_to_dead
+        preset: alert_pulse
+        property: border_flash
+        from: 0.0
+        to: 1.0
+        description: "Card border pulses red when agent dies"
+      - event: status_to_done
+        preset: view_switch
+        property: color_lerp
+        from: 0.0
+        to: 1.0
+        description: "Snappy transition to green on completion"
+
+  - component: MissionCard
+    events:
+      - event: column_change
+        preset: view_switch
+        property: position_x
+        from: "old_column_x"
+        to: "new_column_x"
+        description: "Card animates horizontally when mission moves between kanban columns"
+
+  - component: EventLog
+    events:
+      - event: new_error_event
+        preset: alert_pulse
+        property: row_highlight
+        from: 0.0
+        to: 1.0
+        description: "Error rows flash red briefly on arrival"
+
+  # -- Form animations ---------------------------------------------------------
+  - component: AdmiralQuestionForm
+    events:
+      - event: appear
+        preset: modal_open
+        property: opacity
+        from: 0.0
+        to: 1.0
+        description: "Form content bounces in with modal"
+
+  - component: ConfirmDialog
+    events:
+      - event: appear
+        preset: modal_open
+        property: opacity
+        from: 0.0
+        to: 1.0
+        description: "Confirmation dialog bounces in"
+
+  # -- Spinner/timer animations ------------------------------------------------
+  - component: LoadingSpinner
+    events:
+      - event: start
+        preset: spinner_bounce
+        property: opacity
+        from: 0.0
+        to: 1.0
+        description: "Spinner bounces into view when loading begins"
+
+  - component: GateCountdown
+    events:
+      - event: warn_threshold
+        preset: alert_pulse
+        property: color_intensity
+        from: 0.5
+        to: 1.0
+        description: "Timer pulses when approaching timeout"
+      - event: critical_threshold
+        preset: alert_pulse
+        property: color_intensity
+        from: 0.3
+        to: 1.0
+        description: "Timer pulses more aggressively near expiry"
+
+  # -- Navigation animations ---------------------------------------------------
+  - component: BreadcrumbNav
+    events:
+      - event: segment_added
+        preset: view_switch
+        property: new_segment_opacity
+        from: 0.0
+        to: 1.0
+        description: "New breadcrumb segment snaps in on drill-down"
+
+  - component: HeaderBar
+    events:
+      - event: mode_change
+        preset: view_switch
+        property: mode_color_lerp
+        from: 0.0
+        to: 1.0
+        description: "Mode indicator color springs to new mode color"
+
+  # -- Planning animations -----------------------------------------------------
+  - component: SpecialistCard
+    events:
+      - event: status_to_done
+        preset: view_switch
+        property: border_color_lerp
+        from: 0.0
+        to: 1.0
+        description: "Border springs to green when specialist completes"
+      - event: status_to_failed
+        preset: alert_pulse
+        property: border_flash
+        from: 0.0
+        to: 1.0
+        description: "Border pulses red on specialist failure"
+
+  - component: SignoffTracker
+    events:
+      - event: signoff_complete
+        preset: view_switch
+        property: icon_color_lerp
+        from: 0.0
+        to: 1.0
+        description: "Icon springs to green check when role signs off"
+
+  # ==========================================================================
+  # STAR TREK THEMED ANIMATIONS
+  # ==========================================================================
+  # These bindings use the Trek-themed spring presets for immersive effects.
+  # All are optional eye-candy -- components render correctly without them.
+  # Disabled in executive mode and compact breakpoints.
+
+  # -- Transporter beam effects -----------------------------------------------
+  - component: AgentCard
+    events:
+      - event: agent_spawned
+        preset: beam_materialize
+        property: "shimmer_column + opacity"
+        description: >
+          New agent card beams in with transporter shimmer effect.
+          Gold sparkle characters (* . : |) replace the card area
+          top-to-bottom, then resolve into the actual card content.
+      - event: agent_completed
+        preset: beam_dematerialize
+        property: "shimmer_column + opacity"
+        description: >
+          Completed agent card beams out with reverse transporter
+          shimmer. Card content dissolves bottom-to-top into sparkle
+          characters, then fades.
+
+  - component: SpecialistCard
+    events:
+      - event: specialist_spawned
+        preset: beam_materialize
+        property: "shimmer_column + opacity"
+        description: "Specialist beams into the Ready Room when spawned"
+      - event: specialist_departed
+        preset: beam_dematerialize
+        property: "shimmer_column + opacity"
+        description: "Specialist beams out when work is complete"
+
+  - component: MissionCard
+    events:
+      - event: mission_created
+        preset: beam_materialize
+        property: "shimmer_column + opacity"
+        description: "New mission materializes in backlog column with transporter effect"
+
+  # -- Warp effects ------------------------------------------------------------
+  - component: AppShell
+    events:
+      - event: mode_to_execution
+        preset: warp_engage
+        property: "content_scale_x + content_scale_y"
+        description: >
+          Full-screen warp jump when commission is approved and execution begins.
+          Stars streak across the viewport in butterscotch->white, content
+          compresses horizontally and stretches vertically, then snaps to the
+          execution dashboard.
+      - event: mode_from_execution
+        preset: warp_decelerate
+        property: "content_scale_x + content_scale_y"
+        description: >
+          Reverse warp when returning to planning mode. Execution dashboard
+          appears to drop out of warp -- content arrives stretched and smoothly
+          normalizes.
+
+  - component: WaveProgressBar
+    events:
+      - event: wave_dispatched
+        preset: warp_engage
+        property: "bar_scale_x"
+        description: >
+          Brief warp-stretch effect on the progress bar when a new wave
+          is dispatched. Bar compresses then snaps to starting position.
+
+  # -- Red alert / klaxon effects ----------------------------------------------
+  - component: HeaderBar
+    events:
+      - event: red_alert_activated
+        preset: red_alert_klaxon
+        property: "background_color_lerp + border_color_lerp"
+        description: >
+          Full header flashes red alert klaxon pattern when a critical
+          event occurs (mission halted, agent dead, system health critical).
+          Background alternates black/dark-red, border flashes red_alert.
+          Sustained oscillation (4-6 flashes) before settling.
+
+  - component: Panel
+    events:
+      - event: contains_halted_mission
+        preset: red_alert_klaxon
+        property: border_color_lerp
+        description: >
+          Panel border flashes red alert when it contains a halted mission
+          or dead agent. More dramatic than alert_pulse for critical states.
+
+  # -- Shield effects ----------------------------------------------------------
+  - component: GateResultRow
+    events:
+      - event: gate_passed
+        preset: shields_up
+        property: border_brightness
+        description: >
+          Brief shield-bright flash when a gate passes. Border brightens
+          toward white then settles back. Visual reward for green gates.
+
+  - component: WaveProgressBar
+    events:
+      - event: wave_complete
+        preset: shields_up
+        property: bar_brightness
+        description: >
+          Shield flash across the completed progress bar. Green brightens
+          to near-white then settles. Victory flash.
+
+  - component: PlanApprovalForm
+    events:
+      - event: plan_approved
+        preset: shields_up
+        property: border_brightness
+        description: "Shield flash on the modal border when Admiral approves the plan"
+
+# ============================================================================
+# COMPONENT COMPOSITION PATTERNS
+# ============================================================================
+composition_patterns:
+  - name: fleet_overview
+    description: >
+      Admiral's command center -- landing screen. Fleet metrics
+      absorbed into header (no separate FleetSummary row).
+    structure: |
+      AppShell
+      +-- HeaderBar [variant=fleet, with inline fleet metrics]
+      +-- PanelGrid [ratios=0.6,0.4]
+      |   +-- FocusablePanel "Fleet"
+      |   |   +-- ShipCard (per ship, bubbles/list)
+      |   +-- FocusablePanel "Ship Preview"
+      |       +-- ShipPreviewPanel
+      +-- NavigableToolbar [n:New d:Directive r:Roster i:Inbox ?:Help q:Quit]
+
+  - name: ship_bridge
+    description: >
+      Per-ship monitoring -- simplified. Tactical row removed.
+      Wave summary inline in header. Phase detail in Mission Detail.
+    structure: |
+      AppShell
+      +-- ShipHeaderBar [with inline wave summary]
+      +-- PanelGrid [ratios=0.4,0.6]
+      |   +-- FocusablePanel "Crew"
+      |   |   +-- AgentGrid
+      |   +-- FocusablePanel "Missions"
+      |       +-- MissionBoard
+      +-- FocusablePanel "Engineering Logs"
+      |   +-- EventLog
+      +-- NavigableToolbar [p:Plan a:Assign l:Launch w:Wave ?:Help Esc:Fleet]
+
+  - name: ready_room
+    description: >
+      Planning session view -- simplified. Coverage and dependency
+      moved to Plan Review view. Focused on crew sessions only.
+    structure: |
+      AppShell
+      +-- ReadyRoomHeader
+      +-- PanelGrid [ratios=0.3,0.7]
+      |   +-- FocusablePanel "Directive"
+      |   |   +-- Viewport (Glamour markdown, togglable)
+      |   +-- FocusablePanel "Crew Sessions"
+      |       +-- SpecialistGrid
+      +-- NavigableToolbar [a:Approve f:Feedback s:Shelve v:Review t:Toggle ?:Help Esc:Bridge]
+
+  - name: plan_review
+    description: >
+      Full-screen plan review -- promoted from overlay. Contains
+      the coverage matrix and dependency graph that were removed
+      from the Ready Room.
+    structure: |
+      AppShell
+      +-- PlanReviewHeader
+      +-- PanelGrid [ratios=0.5,0.5]
+      |   +-- FocusablePanel "Mission Manifest"
+      |   |   +-- Viewport (Glamour-rendered manifest)
+      |   +-- FocusablePanel "Analysis"
+      |       +-- CoverageMatrix
+      |       +-- DependencyGraph
+      +-- NavigableToolbar [a:Approve f:Feedback s:Shelve ?:Help Esc:ReadyRoom]
+
+  - name: mission_detail
+    description: >
+      Mission drill-down -- now includes full AC phase tracking
+      (absorbed from the removed Ship Bridge tactical row).
+    structure: |
+      AppShell
+      +-- MissionDetailHeader
+      +-- PanelGrid [ratios=0.4,0.3,0.3]
+      |   +-- FocusablePanel "AC Phases"
+      |   |   +-- ACPhaseDetail (full 6-dot pipeline per AC)
+      |   +-- FocusablePanel "Gate Evidence"
+      |   |   +-- GateEvidenceTable
+      |   +-- FocusablePanel "Demo Token"
+      |       +-- Viewport (Glamour)
+      +-- NavigableToolbar [context-sensitive actions]
+
+  - name: fleet_monitor
+    description: >
+      Condensed multi-ship monitoring view. One row per ship.
+    structure: |
+      AppShell
+      +-- MonitorHeader
+      +-- FocusablePanel "Fleet Status"
+      |   +-- ShipStatusRow (per launched ship, bubbles/list)
+      +-- NavigableToolbar [Enter:Bridge i:Inbox ?:Help Esc:Fleet]
+
+  - name: project_settings
+    description: >
+      Global settings view with tabbed sections for verification gates,
+      crew defaults, fleet defaults, and export/import.
+    structure: |
+      AppShell
+      +-- SettingsHeader
+      +-- SettingsTabs
+      |   +-- Tab 1: GateCommandEditor (per gate, bubbles/list)
+      |   +-- Tab 2: CrewDefaultsForm (huh.Form)
+      |   +-- Tab 3: FleetDefaultsForm (huh.Form)
+      |   +-- Tab 4: ExportImportPanel (huh.Input + FilePicker + Confirm)
+      +-- NavigableToolbar [1:Gates 2:Crew 3:Fleet 4:Export ?:Help Esc:Fleet]
+
+  - name: admiral_question_flow
+    description: >
+      Modal flow for Admiral questions. Renders the AdmiralQuestionForm
+      inside a ModalOverlay on top of the current view.
+    structure: |
+      [Current View]  (dimmed background)
+      +-- ModalOverlay [variant=question]
+          +-- AdmiralQuestionForm
+
+  - name: confirm_action_flow
+    description: >
+      Modal flow for destructive action confirmation.
+    structure: |
+      [Current View]  (dimmed background)
+      +-- ModalOverlay [variant=alert]
+          +-- ConfirmDialog
+
+# ============================================================================
+# RESPONSIVE BEHAVIOR
+# ============================================================================
+responsive:
+  breakpoints:
+    compact:
+      max_width: 119
+      description: "Narrow terminals -- stack panels vertically, reduce log lines"
+      adjustments:
+        - "PanelGrid -> vertical stacking (JoinVertical instead of JoinHorizontal)"
+        - "AgentGrid height reduced to 4 rows"
+        - "EventLog max_lines reduced to 4"
+        - "MissionBoard forced to summary variant"
+        - "SpecialistGrid columns set to 1"
+        - "BreadcrumbNav uses compact variant"
+        - "PhaseIndicator uses compact variant"
+    standard:
+      min_width: 120
+      max_width: 179
+      description: "Standard terminals -- default layout"
+    wide:
+      min_width: 180
+      description: "Wide terminals -- expanded panels, more detail"
+      adjustments:
+        - "EventLog max_lines increased to 16"
+        - "AgentGrid shows full agent IDs (no truncation)"
+        - "MissionBoard auto-expands to full variant"
+        - "MissionCard shows full title text"
+        - "SpecialistGrid columns set to 4"
+
+# ============================================================================
+# LIBRARY REFERENCES
+# ============================================================================
+# Agents implementing from this file MUST use these exact imports and APIs.
+
+references:
+  - name: bubbles
+    package: "github.com/charmbracelet/bubbles"
+    version: ">=0.20.0"
+    url: "https://github.com/charmbracelet/bubbles"
+    used_for: "Pre-built tea.Model components"
+    components_used:
+      - module: "bubbles/spinner"
+        used_by: ["LoadingSpinner"]
+        import: "github.com/charmbracelet/bubbles/spinner"
+      - module: "bubbles/viewport"
+        used_by: ["EventLog", "OutputViewport"]
+        import: "github.com/charmbracelet/bubbles/viewport"
+      - module: "bubbles/list"
+        used_by: ["AgentGrid"]
+        import: "github.com/charmbracelet/bubbles/list"
+      - module: "bubbles/table"
+        used_by: ["CoverageMatrix", "GateEvidenceTable"]
+        import: "github.com/charmbracelet/bubbles/table"
+      - module: "bubbles/progress"
+        used_by: ["WaveProgressBar"]
+        import: "github.com/charmbracelet/bubbles/progress"
+      - module: "bubbles/help"
+        used_by: ["HelpOverlay"]
+        import: "github.com/charmbracelet/bubbles/help"
+      - module: "bubbles/key"
+        used_by: ["HelpOverlay", "FocusablePanel"]
+        import: "github.com/charmbracelet/bubbles/key"
+      - module: "bubbles/stopwatch"
+        used_by: ["ElapsedTimer"]
+        import: "github.com/charmbracelet/bubbles/stopwatch"
+      - module: "bubbles/timer"
+        used_by: ["GateCountdown"]
+        import: "github.com/charmbracelet/bubbles/timer"
+      - module: "bubbles/filepicker"
+        used_by: ["PRDFilePicker (via huh.FilePicker)"]
+        import: "github.com/charmbracelet/bubbles/filepicker"
+        note: "Wrapped by huh.FilePicker -- import huh, not filepicker directly"
+      - module: "bubbles/paginator"
+        used_by: ["MissionBoard"]
+        import: "github.com/charmbracelet/bubbles/paginator"
+
+  - name: huh
+    package: "github.com/charmbracelet/huh"
+    version: ">=0.6.0"
+    url: "https://github.com/charmbracelet/huh"
+    used_for: "Terminal forms -- all Admiral input interactions"
+    components_used:
+      - type: "huh.Input"
+        used_by: ["CommandBar"]
+        wraps: "bubbles/textinput"
+      - type: "huh.Text"
+        used_by: ["PlanApprovalForm"]
+        wraps: "bubbles/textarea"
+      - type: "huh.Select"
+        used_by: ["AdmiralQuestionForm", "PlanApprovalForm"]
+      - type: "huh.MultiSelect"
+        used_by: ["BatchActionSelector"]
+      - type: "huh.Confirm"
+        used_by: ["AdmiralQuestionForm", "ConfirmDialog", "BatchActionSelector"]
+      - type: "huh.Note"
+        used_by: ["AdmiralQuestionForm", "PlanApprovalForm"]
+        note: "Read-only context/instructions within form flow"
+      - type: "huh.FilePicker"
+        used_by: ["PRDFilePicker"]
+        wraps: "bubbles/filepicker"
+      - type: "huh.Form"
+        used_by: ["AdmiralQuestionForm", "PlanApprovalForm", "BatchActionSelector"]
+
+  - name: lipgloss
+    package: "github.com/charmbracelet/lipgloss"
+    version: ">=1.0.0"
+    url: "https://github.com/charmbracelet/lipgloss"
+    used_for: "All styling, layout composition, border rendering, color application"
+    api_used:
+      layout:
+        - "lipgloss.JoinVertical(pos, ...string) -- AppShell, PanelGrid stacked, MissionBoard columns"
+        - "lipgloss.JoinHorizontal(pos, ...string) -- PanelGrid, SpecialistGrid, HeaderBar, MissionBoard"
+        - "lipgloss.Place(w, h, hPos, vPos, string) -- ModalOverlay centering"
+      styling:
+        - "lipgloss.NewStyle() -- all pure-lipgloss components (StatusBadge, AgentCard, etc.)"
+        - "style.Bold(true), style.Faint(true), style.Underline(true)"
+        - "style.Foreground(lipgloss.Color(hex))"
+        - "style.Background(lipgloss.Color(hex))"
+        - "style.Padding(...int), style.Margin(...int)"
+        - "style.Width(int), style.Height(int), style.MaxWidth(int)"
+      borders:
+        - "lipgloss.RoundedBorder() -- Panel, FocusablePanel, SpecialistCard"
+        - "lipgloss.DoubleBorder() -- ModalOverlay"
+        - "style.Border(border), style.BorderForeground(color)"
+      colors:
+        - "lipgloss.Color(hex) -- all token hex values"
+        - "lipgloss.AdaptiveColor{Light, Dark} -- terminal-adaptive colors"
+
+  - name: harmonica
+    package: "github.com/charmbracelet/harmonica"
+    version: ">=0.2.0"
+    url: "https://github.com/charmbracelet/harmonica"
+    used_for: "Spring animations for all transitions, effects, and Trek-themed visuals"
+    api_used:
+      - "harmonica.NewSpring(frequency, dampingRatio) -- create spring from preset"
+      - "spring.Update(target, velocity, dt) -- per-frame tick"
+      - "harmonica.FPS(60) -- time delta helper for 60 FPS tea.Tick"
+    presets_used:
+      standard:
+        - "view_switch (8.0, 1.0) -- drill-down push/pop, focus transitions"
+        - "modal_open (6.0, 0.8) -- overlay entrance bounce"
+        - "modal_close (10.0, 1.0) -- overlay dismissal"
+        - "alert_pulse (4.0, 0.3) -- stuck/error oscillation"
+        - "progress_smooth (5.0, 1.2) -- progress bars, health"
+        - "spinner_bounce (6.0, 0.6) -- loading spinners"
+      star_trek:
+        - "warp_engage (12.0, 0.4) -- mode transition warp jump"
+        - "warp_decelerate (6.0, 1.0) -- smooth arrival from warp"
+        - "beam_materialize (5.0, 0.7) -- transporter shimmer in"
+        - "beam_dematerialize (7.0, 0.7) -- transporter shimmer out"
+        - "red_alert_klaxon (3.0, 0.15) -- sustained red border flash"
+        - "shields_up (8.0, 0.5) -- bright ripple on success"

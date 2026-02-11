@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Project Settings - Ship Commander 3</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #1a1a2e;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .terminal-window {
+            max-width: 1100px;
+            width: 100%;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .terminal-titlebar {
+            background: #2D2D2D;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .terminal-dots {
+            display: flex;
+            gap: 8px;
+            margin-right: auto;
+        }
+
+        .terminal-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .terminal-dot.red { background: #FF5F56; }
+        .terminal-dot.yellow { background: #FFBD2E; }
+        .terminal-dot.green { background: #27C93F; }
+
+        .terminal-title {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #8B8B8B;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .terminal-body {
+            background: #000000;
+            color: #F5F6FA;
+            padding: 20px;
+            font-size: 13px;
+            line-height: 1.4;
+            border-radius: 0 0 8px 8px;
+            min-height: 600px;
+        }
+
+        .header {
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #52526A;
+        }
+
+        .header-title {
+            color: #FF9966;
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 6px;
+        }
+
+        .header-info {
+            color: #CCCCCC;
+            font-size: 12px;
+            display: flex;
+            gap: 20px;
+        }
+
+        .header-info-label {
+            color: #9999CC;
+        }
+
+        .tabs-container {
+            margin-bottom: 16px;
+        }
+
+        .tabs-bar {
+            display: flex;
+            gap: 4px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #52526A;
+            margin-bottom: 16px;
+        }
+
+        .tab {
+            padding: 4px 12px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .tab.active {
+            color: #FF9966;
+        }
+
+        .tab.active::before {
+            content: '▸ ';
+        }
+
+        .tab.inactive {
+            color: #52526A;
+        }
+
+        .tab-separator {
+            color: #52526A;
+        }
+
+        .tab-content {
+            padding: 0 12px;
+        }
+
+        .gate-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .gate-item {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px;
+            border: 1px solid #52526A;
+            border-radius: 4px;
+            background: rgba(153, 153, 204, 0.05);
+        }
+
+        .gate-item.disabled {
+            opacity: 0.6;
+            background: rgba(82, 82, 106, 0.05);
+        }
+
+        .gate-icon {
+            margin-right: 12px;
+            font-size: 14px;
+        }
+
+        .gate-icon.enabled {
+            color: #33FF33;
+        }
+
+        .gate-icon.disabled {
+            color: #52526A;
+        }
+
+        .gate-label {
+            color: #9999CC;
+            min-width: 120px;
+        }
+
+        .gate-command {
+            color: #F5F6FA;
+            flex: 1;
+        }
+
+        .gate-command.disabled-text {
+            color: #52526A;
+            font-style: italic;
+        }
+
+        .gate-edit-indicator {
+            color: #52526A;
+            margin-left: 12px;
+            font-size: 11px;
+        }
+
+        .toolbar {
+            position: relative;
+            margin-top: 20px;
+            padding-top: 12px;
+            border-top: 1px solid #52526A;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .toolbar-item {
+            color: #52526A;
+        }
+
+        .toolbar-key {
+            color: #FF9966;
+            font-weight: bold;
+        }
+
+        .toolbar-help {
+            color: #9966FF;
+        }
+
+        .toolbar-esc {
+            color: #CCCCCC;
+        }
+
+        /* Box drawing characters for borders */
+        .box-border {
+            color: #52526A;
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal-window">
+        <div class="terminal-titlebar">
+            <div class="terminal-dots">
+                <div class="terminal-dot red"></div>
+                <div class="terminal-dot yellow"></div>
+                <div class="terminal-dot green"></div>
+            </div>
+            <div class="terminal-title">ship-commander-3 — project-settings</div>
+        </div>
+
+        <div class="terminal-body">
+            <!-- Header -->
+            <div class="header">
+                <div class="header-title">PROJECT SETTINGS</div>
+                <div class="header-info">
+                    <div>
+                        <span class="header-info-label">Path:</span>
+                        <span>~/Projects/my-app</span>
+                    </div>
+                    <div>
+                        <span class="header-info-label">Config:</span>
+                        <span>~/.sc3/config.json</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="tabs-container">
+                <div class="tabs-bar">
+                    <span class="tab active">Gates</span>
+                    <span class="tab-separator">│</span>
+                    <span class="tab inactive">Crew</span>
+                    <span class="tab-separator">│</span>
+                    <span class="tab inactive">Fleet</span>
+                    <span class="tab-separator">│</span>
+                    <span class="tab inactive">Export</span>
+                </div>
+
+                <!-- Tab 1 Content: Verification Gates -->
+                <div class="tab-content">
+                    <div class="gate-list">
+                        <div class="gate-item">
+                            <div class="gate-icon enabled">✓</div>
+                            <div class="gate-label">Lint:</div>
+                            <div class="gate-command">npm run lint</div>
+                            <div class="gate-edit-indicator">[Enter to edit]</div>
+                        </div>
+
+                        <div class="gate-item">
+                            <div class="gate-icon enabled">✓</div>
+                            <div class="gate-label">Typecheck:</div>
+                            <div class="gate-command">npx tsc --noEmit</div>
+                            <div class="gate-edit-indicator">[Enter to edit]</div>
+                        </div>
+
+                        <div class="gate-item">
+                            <div class="gate-icon enabled">✓</div>
+                            <div class="gate-label">Test:</div>
+                            <div class="gate-command">npm test -- --watchAll=false</div>
+                            <div class="gate-edit-indicator">[Enter to edit]</div>
+                        </div>
+
+                        <div class="gate-item disabled">
+                            <div class="gate-icon disabled">⊘</div>
+                            <div class="gate-label">Build:</div>
+                            <div class="gate-command disabled-text">(disabled)</div>
+                            <div class="gate-edit-indicator">[Enter to edit]</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Toolbar -->
+            <div class="toolbar">
+                <span class="toolbar-item">
+                    <span class="toolbar-key">[1]</span> Gates
+                </span>
+                <span class="toolbar-item">
+                    <span class="toolbar-key">[2]</span> Crew
+                </span>
+                <span class="toolbar-item">
+                    <span class="toolbar-key">[3]</span> Fleet
+                </span>
+                <span class="toolbar-item">
+                    <span class="toolbar-key">[4]</span> Export
+                </span>
+                <span class="toolbar-item toolbar-help">
+                    <span class="toolbar-key">[?]</span> Help
+                </span>
+                <span class="toolbar-item toolbar-esc">
+                    <span class="toolbar-key">[Esc]</span> Fleet
+                </span>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wave Manager - Ship Commander 3</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #1a1a2e;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.4;
+            padding: 40px 20px;
+            color: #F5F6FA;
+        }
+
+        .terminal-window {
+            max-width: 1100px;
+            margin: 0 auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .terminal-titlebar {
+            background: #2D2D2D;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .terminal-dots {
+            display: flex;
+            gap: 8px;
+            margin-right: auto;
+        }
+
+        .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .dot.red { background: #FF5F56; }
+        .dot.yellow { background: #FFBD2E; }
+        .dot.green { background: #27C93F; }
+
+        .terminal-title {
+            flex: 1;
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+            margin-right: 60px;
+        }
+
+        .terminal-body {
+            background: #000000;
+            padding: 20px;
+            min-height: 600px;
+            position: relative;
+            border-radius: 0 0 8px 8px;
+        }
+
+        /* Background dimmed content */
+        .background-content {
+            opacity: 0.15;
+            color: #F5F6FA;
+            line-height: 1.6;
+        }
+
+        /* Modal Overlay */
+        .modal-overlay {
+            position: absolute;
+            top: 5%;
+            left: 2.5%;
+            width: 95%;
+            height: 90%;
+            background: rgba(0, 0, 0, 0.95);
+            border: 3px double #FFAA00;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            z-index: 100;
+        }
+
+        /* Wave Header */
+        .wave-header {
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #FFAA00;
+        }
+
+        .wave-header-title {
+            color: #FF9966;
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 4px;
+        }
+
+        .wave-header-stats {
+            color: #9999CC;
+            font-size: 12px;
+        }
+
+        /* Content Area */
+        .content-area {
+            display: flex;
+            gap: 16px;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Wave List */
+        .wave-list {
+            width: 30%;
+            overflow-y: auto;
+            padding-right: 8px;
+        }
+
+        .wave-item {
+            padding: 8px;
+            margin-bottom: 8px;
+            border-left: 3px solid #52526A;
+        }
+
+        .wave-item.selected {
+            background: rgba(153, 102, 255, 0.2);
+            border-left-color: #9966FF;
+        }
+
+        .wave-item.complete {
+            border-left-color: #33FF33;
+        }
+
+        .wave-title {
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+
+        .wave-item.complete .wave-title {
+            color: #33FF33;
+        }
+
+        .wave-item.selected .wave-title {
+            color: #9966FF;
+        }
+
+        .wave-item.pending .wave-title {
+            color: #52526A;
+        }
+
+        .progress-bar {
+            display: flex;
+            margin-bottom: 4px;
+        }
+
+        .progress-fill {
+            color: #FF9966;
+        }
+
+        .progress-empty {
+            color: #52526A;
+        }
+
+        .wave-stats {
+            font-size: 11px;
+            color: #CCCCCC;
+        }
+
+        .wave-icon {
+            margin-left: 8px;
+        }
+
+        /* Wave Mission Detail */
+        .wave-mission-detail {
+            width: 70%;
+            overflow-y: auto;
+            padding-left: 16px;
+            border-left: 1px solid #52526A;
+        }
+
+        .detail-header {
+            color: #9966FF;
+            font-weight: bold;
+            margin-bottom: 12px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #52526A;
+        }
+
+        .mission-table {
+            width: 100%;
+        }
+
+        .mission-table-header {
+            color: #FFAA00;
+            font-weight: bold;
+            padding: 4px 8px;
+            border-bottom: 1px solid #52526A;
+            margin-bottom: 4px;
+        }
+
+        .mission-row {
+            padding: 6px 8px;
+            margin-bottom: 2px;
+            display: grid;
+            grid-template-columns: 60px 1fr 100px 60px 80px;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .mission-row:hover {
+            background: rgba(153, 153, 204, 0.1);
+        }
+
+        .mission-id {
+            color: #9999CC;
+        }
+
+        .mission-title {
+            color: #F5F6FA;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            text-align: center;
+        }
+
+        .status-badge.ready {
+            background: rgba(51, 255, 51, 0.2);
+            color: #33FF33;
+            border: 1px solid #33FF33;
+        }
+
+        .status-badge.progress {
+            background: rgba(255, 153, 102, 0.2);
+            color: #FF9966;
+            border: 1px solid #FF9966;
+        }
+
+        .status-badge.complete {
+            background: rgba(153, 153, 204, 0.2);
+            color: #9999CC;
+            border: 1px solid #9999CC;
+        }
+
+        .conflict-icon {
+            color: #FFCC00;
+            text-align: center;
+        }
+
+        .conflict-icon.alert {
+            color: #FF3333;
+        }
+
+        .merge-checkbox {
+            text-align: center;
+            color: #33FF33;
+        }
+
+        .merge-checkbox.disabled {
+            color: #52526A;
+        }
+
+        /* Navigable Toolbar */
+        .navigable-toolbar {
+            margin-top: 12px;
+            padding-top: 8px;
+            border-top: 1px solid #FFAA00;
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+        }
+
+        .toolbar-button {
+            color: #F5F6FA;
+        }
+
+        .toolbar-button .key {
+            color: #FF9966;
+            font-weight: bold;
+        }
+
+        .toolbar-button .label {
+            color: #CCCCCC;
+        }
+
+        .toolbar-button.highlight .key {
+            color: #9966FF;
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal-window">
+        <div class="terminal-titlebar">
+            <div class="terminal-dots">
+                <div class="dot red"></div>
+                <div class="dot yellow"></div>
+                <div class="dot green"></div>
+            </div>
+            <div class="terminal-title">ship-commander-3 — Wave Manager</div>
+        </div>
+        <div class="terminal-body">
+            <!-- Background dimmed content (Ship Bridge underneath) -->
+            <div class="background-content">
+╔════════════════════════════════════════════════════════════════════════════════════════════════╗
+║                              USS ENTERPRISE - SHIP BRIDGE                                      ║
+║                                                                                                ║
+║  STATUS: NOMINAL     DIRECTIVE: feature/quantum-drive     MISSIONS: 12/15 COMPLETE             ║
+║                                                                                                ║
+║  ┌─ MISSION PANEL ──────────────────┐  ┌─ SHIP STATUS ───────────────────┐                   ║
+║  │ M-101  ✓ Warp Core Calibration   │  │ Shields: ████████░░ 80%          │                   ║
+║  │ M-102  ▸ Sensor Array Update     │  │ Systems: ████████████ 100%       │                   ║
+║  │ M-103  ○ Navigation Protocols    │  │ Crew:    ████████████ READY      │                   ║
+            </div>
+
+            <!-- Modal Overlay -->
+            <div class="modal-overlay">
+                <!-- Wave Header -->
+                <div class="wave-header">
+                    <div class="wave-header-title">╔══ WAVE MANAGER -- USS Enterprise ══╗</div>
+                    <div class="wave-header-stats">3/4 waves complete, 12 missions merged.</div>
+                </div>
+
+                <!-- Content Area -->
+                <div class="content-area">
+                    <!-- Wave List (30%) -->
+                    <div class="wave-list">
+                        <div class="wave-item complete">
+                            <div class="wave-title">Wave 1</div>
+                            <div class="progress-bar">
+                                <span class="progress-fill">████████████</span>
+                            </div>
+                            <div class="wave-stats">4/4 <span class="wave-icon">✓</span></div>
+                        </div>
+
+                        <div class="wave-item selected">
+                            <div class="wave-title">Wave 2</div>
+                            <div class="progress-bar">
+                                <span class="progress-fill">██████</span><span class="progress-empty">░░░░░░</span>
+                            </div>
+                            <div class="wave-stats">3/5 <span class="wave-icon">▸</span></div>
+                        </div>
+
+                        <div class="wave-item pending">
+                            <div class="wave-title">Wave 3</div>
+                            <div class="progress-bar">
+                                <span class="progress-empty">░░░░░░░░░░░░</span>
+                            </div>
+                            <div class="wave-stats">0/3 <span class="wave-icon">○</span></div>
+                        </div>
+
+                        <div class="wave-item pending">
+                            <div class="wave-title">Wave 4</div>
+                            <div class="progress-bar">
+                                <span class="progress-empty">░░░░░░░░░░░░</span>
+                            </div>
+                            <div class="wave-stats">0/2 <span class="wave-icon">○</span></div>
+                        </div>
+                    </div>
+
+                    <!-- Wave Mission Detail (70%) -->
+                    <div class="wave-mission-detail">
+                        <div class="detail-header">Wave 2 - Missions (5)</div>
+
+                        <div class="mission-table">
+                            <div class="mission-table-header" style="display: grid; grid-template-columns: 60px 1fr 100px 60px 80px; gap: 12px;">
+                                <div>ID</div>
+                                <div>TITLE</div>
+                                <div>STATUS</div>
+                                <div>CONF</div>
+                                <div>MERGE</div>
+                            </div>
+
+                            <div class="mission-row">
+                                <div class="mission-id">M-201</div>
+                                <div class="mission-title">Sensor calibration fix</div>
+                                <div><span class="status-badge ready">READY</span></div>
+                                <div class="conflict-icon">—</div>
+                                <div class="merge-checkbox">☑</div>
+                            </div>
+
+                            <div class="mission-row">
+                                <div class="mission-id">M-202</div>
+                                <div class="mission-title">Deflector shield optimization</div>
+                                <div><span class="status-badge ready">READY</span></div>
+                                <div class="conflict-icon">—</div>
+                                <div class="merge-checkbox">☑</div>
+                            </div>
+
+                            <div class="mission-row">
+                                <div class="mission-id">M-203</div>
+                                <div class="mission-title">Warp signature analysis</div>
+                                <div><span class="status-badge complete">DONE</span></div>
+                                <div class="conflict-icon alert">⚠</div>
+                                <div class="merge-checkbox disabled">☐</div>
+                            </div>
+
+                            <div class="mission-row">
+                                <div class="mission-id">M-204</div>
+                                <div class="mission-title">Transporter buffer upgrade</div>
+                                <div><span class="status-badge progress">ACTIVE</span></div>
+                                <div class="conflict-icon">—</div>
+                                <div class="merge-checkbox disabled">☐</div>
+                            </div>
+
+                            <div class="mission-row">
+                                <div class="mission-id">M-205</div>
+                                <div class="mission-title">Navigation chart update</div>
+                                <div><span class="status-badge ready">READY</span></div>
+                                <div class="conflict-icon alert">⚠</div>
+                                <div class="merge-checkbox disabled">☐</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Navigable Toolbar -->
+                <div class="navigable-toolbar">
+                    <div class="toolbar-button">
+                        <span class="key">[m]</span> <span class="label">Merge Ready</span>
+                    </div>
+                    <div class="toolbar-button">
+                        <span class="key">[c]</span> <span class="label">Merge Conflicts</span>
+                    </div>
+                    <div class="toolbar-button">
+                        <span class="key">[?]</span> <span class="label">Help</span>
+                    </div>
+                    <div class="toolbar-button highlight">
+                        <span class="key">[Esc]</span> <span class="label">Close</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

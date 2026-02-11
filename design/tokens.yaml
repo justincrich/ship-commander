@@ -1,0 +1,656 @@
+# =============================================================================
+# Ship Commander 3 -- Design Tokens
+# =============================================================================
+# Terminal-native design tokens for Lipgloss styling.
+# All values map directly to Lipgloss API calls in Go.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Colors
+# -----------------------------------------------------------------------------
+
+colors:
+
+  # -- Palette: LCARS Classic + Charm Accents --------------------------------
+
+  palette:
+    # Primary LCARS colors
+    butterscotch:
+      hex: "#FF9966"
+      role: "Primary actions, active elements, focused interactions"
+    blue:
+      hex: "#9999CC"
+      role: "Standard information, status text, section headers"
+    purple:
+      hex: "#CC99CC"
+      role: "Secondary information, planning phase, review state"
+    pink:
+      hex: "#FF99CC"
+      role: "Notifications, system messages, alerts"
+    gold:
+      hex: "#FFAA00"
+      role: "Emphasis, selected items, highlighted values"
+    almond:
+      hex: "#FFAA90"
+      role: "Warm accent, secondary active elements"
+
+    # Semantic status colors
+    red_alert:
+      hex: "#FF3333"
+      role: "Critical errors, halted missions, failed gates"
+    yellow_caution:
+      hex: "#FFCC00"
+      role: "Warnings, stuck agents, degraded health"
+    green_ok:
+      hex: "#33FF33"
+      role: "Success, completed missions, passed gates, healthy"
+
+    # Backgrounds and neutrals
+    black:
+      hex: "#000000"
+      role: "Primary background"
+    dark_blue:
+      hex: "#1B4F8F"
+      role: "Panel background tint, header background"
+    galaxy_gray:
+      hex: "#52526A"
+      role: "Inactive elements, disabled state, unfocused borders"
+    space_white:
+      hex: "#F5F6FA"
+      role: "Primary text on dark backgrounds"
+    light_gray:
+      hex: "#CCCCCC"
+      role: "Secondary text, metadata, timestamps"
+
+    # Charm-influenced accents
+    moonlit_violet:
+      hex: "#9966FF"
+      role: "Focus indicators, cursor highlights, active border"
+    ice:
+      hex: "#99CCFF"
+      role: "Cool information panels, onboarding overlays, help text"
+
+  # -- Semantic Color Mapping ------------------------------------------------
+
+  semantic:
+    # Interaction states
+    active: butterscotch
+    focus: moonlit_violet
+    disabled: galaxy_gray
+    selected: gold
+
+    # Status
+    success: green_ok
+    error: red_alert
+    warning: yellow_caution
+    info: blue
+
+    # Domain-specific
+    planning: purple
+    review: purple
+    notification: pink
+    executing: butterscotch
+    halted: red_alert
+    stuck: yellow_caution
+    healthy: green_ok
+    degraded: yellow_caution
+    critical: red_alert
+
+    # Text
+    text_primary: space_white
+    text_secondary: light_gray
+    text_faint: galaxy_gray
+
+    # Surfaces
+    surface_primary: black
+    surface_panel: dark_blue
+    surface_modal: black
+
+  # -- Adaptive Colors (light/dark terminal detection) -----------------------
+
+  adaptive:
+    description: >
+      Use lipgloss.AdaptiveColor{Light: "<light-hex>", Dark: "<dark-hex>"}
+      for each semantic color. Lipgloss detects terminal background and
+      selects the appropriate variant automatically.
+    mappings:
+      text_primary:
+        light: "#1A1A2E"
+        dark: "#F5F6FA"
+      text_secondary:
+        light: "#52526A"
+        dark: "#CCCCCC"
+      surface_primary:
+        light: "#F5F6FA"
+        dark: "#000000"
+      surface_panel:
+        light: "#E8E8F0"
+        dark: "#1B4F8F"
+      active:
+        light: "#CC7733"
+        dark: "#FF9966"
+      success:
+        light: "#228B22"
+        dark: "#33FF33"
+      error:
+        light: "#CC0000"
+        dark: "#FF3333"
+      warning:
+        light: "#CC9900"
+        dark: "#FFCC00"
+      info:
+        light: "#6666AA"
+        dark: "#9999CC"
+      focus:
+        light: "#6633CC"
+        dark: "#9966FF"
+
+# -----------------------------------------------------------------------------
+# Borders
+# -----------------------------------------------------------------------------
+
+borders:
+  panel:
+    style: "lipgloss.RoundedBorder()"
+    color: blue
+    description: >
+      Standard panel border. Rounded corners are the Charmbracelet
+      signature aesthetic. Used for Mission Control, Mission Board,
+      Tactical Display, Engineering Logs, Command Interface.
+
+  modal:
+    style: "lipgloss.DoubleBorder()"
+    color: butterscotch
+    description: >
+      Double border for overlay modals. Visually heavier to distinguish
+      from background panels. Used for Admiral Question, Plan Review,
+      Confirmation dialogs, Help overlay.
+
+  alert:
+    style: "lipgloss.ThickBorder()"
+    color: red_alert
+    description: >
+      Thick border for red_alert and critical warning states. Used when
+      a mission is halted, an agent is dead, or system health is critical.
+
+  focused:
+    style: "lipgloss.RoundedBorder()"
+    color: moonlit_violet
+    description: >
+      Focused panel inherits RoundedBorder but with moonlit_violet color
+      to indicate keyboard focus. Applied to whichever panel currently
+      receives input via Tab cycling.
+
+  inactive:
+    style: "lipgloss.NormalBorder()"
+    color: galaxy_gray
+    description: >
+      Unfocused, inactive panels use NormalBorder (simple ASCII lines)
+      in galaxy_gray. Lower visual weight than focused panels.
+
+  planning:
+    style: "lipgloss.RoundedBorder()"
+    color: purple
+    description: >
+      Planning-phase panels (Ready Room, Specialist Dashboard) use
+      rounded border in purple to distinguish from execution views.
+
+# -----------------------------------------------------------------------------
+# Spacing
+# -----------------------------------------------------------------------------
+
+spacing:
+  padding:
+    panel: 1
+    modal: 2
+    section: 1
+    header: 0
+    card: 0
+    description: >
+      Padding values are in terminal cells (characters). Panel padding
+      of 1 gives breathing room inside borders. Modal padding of 2
+      creates a more spacious dialog feel. Section padding separates
+      logical groups within a panel.
+
+  margin:
+    panel_gap: 1
+    section_gap: 0
+    modal_outer: 0
+    header_bottom: 0
+    description: >
+      Margins control space between elements. Panel gap of 1 creates a
+      single-character gutter between side-by-side panels. Section gap
+      of 0 keeps content tight within panels (padding handles inner
+      breathing room).
+
+# -----------------------------------------------------------------------------
+# Typography
+# -----------------------------------------------------------------------------
+
+typography:
+  header:
+    bold: true
+    underline: true
+    color: space_white
+    description: "Main view titles, panel headers (e.g., SHIP COMMANDER, MISSION BRIEFING ROOM)"
+
+  subheader:
+    bold: true
+    underline: false
+    color: blue
+    description: "Panel section titles, column labels (e.g., Active Agents, Wave Progress)"
+
+  label:
+    bold: false
+    underline: false
+    color: space_white
+    description: "Standard text, field names, list items"
+
+  value:
+    bold: false
+    underline: false
+    faint: true
+    color: light_gray
+    description: "Secondary values, metadata, timestamps, elapsed times"
+
+  status:
+    bold: true
+    underline: false
+    color: "(color-coded by semantic status)"
+    description: "Status labels (RUNNING, DONE, HALTED, PASS, FAIL). Color determined by semantic mapping."
+
+  code:
+    bold: false
+    underline: false
+    faint: true
+    color: light_gray
+    description: "Code references, file paths, command output. Faint weight. Monospace is terminal default."
+
+  emphasis:
+    bold: true
+    underline: false
+    color: gold
+    description: "Highlighted values, selected items, important counts"
+
+  error_text:
+    bold: true
+    underline: false
+    color: red_alert
+    description: "Error messages, failure descriptions, gate rejection reasons"
+
+  help_text:
+    bold: false
+    underline: false
+    faint: true
+    color: ice
+    description: "Keyboard shortcut hints, contextual help, tutorial text"
+
+# -----------------------------------------------------------------------------
+# Icons (Unicode Symbols)
+# -----------------------------------------------------------------------------
+
+icons:
+  # Mission/task status
+  done: "\u2713"          # checkmark
+  working: "\u25CF"       # filled circle (black circle)
+  waiting: "\u23F8"       # pause (double vertical bar)
+  skipped: "\u2298"       # circled division slash
+  failed: "\u2717"        # ballot X
+  halted: "\u2717"        # ballot X (same as failed for mission context)
+
+  # Alert/notification
+  alert: "\u26A0"         # warning sign (triangle)
+  info: "\u2139"          # information source
+
+  # Gate results
+  pass: "\u2713"          # checkmark
+  fail: "\u2717"          # ballot X
+
+  # Agent lifecycle
+  running: "\u25B8"       # right-pointing small triangle
+  blocked: "\u25C6"       # black diamond
+  idle: "\u25CB"          # white circle
+  dead: "\u2620"          # skull and crossbones
+
+  # TDD phases
+  red_phase: "R"
+  green_phase: "G"
+  refactor_phase: "RF"
+  verify: "V"
+
+  # Navigation
+  expand: "\u25B8"        # right-pointing small triangle
+  collapse: "\u25BE"      # down-pointing small triangle
+  breadcrumb: "\u203A"    # single right-pointing angle quotation mark
+
+  # Wave/progress
+  progress_filled: "\u2588"   # full block
+  progress_empty: "\u2591"    # light shade
+  wave_marker: "\u2261"       # identical to (triple bar)
+
+  # Misc
+  arrow_right: "\u2192"       # rightwards arrow
+  bullet: "\u2022"            # bullet
+  star: "\u2605"              # black star (for ratings/health)
+  separator: "\u2502"         # box drawing light vertical (for inline dividers)
+
+# -----------------------------------------------------------------------------
+# Animations (Harmonica Spring Parameters)
+# -----------------------------------------------------------------------------
+
+animations:
+  description: >
+    All animations use harmonica.NewSpring(timeDelta, angularFrequency,
+    dampingRatio). The timeDelta is typically 1.0/60.0 for 60 FPS ticking
+    via tea.Tick. The spring Update(targetValue) returns the current
+    interpolated value and velocity on each tick.
+
+  view_switch:
+    time_delta: 0.01667       # 1.0 / 60.0 (60 FPS)
+    angular_frequency: 8.0
+    damping_ratio: 1.0        # critically-damped
+    feel: "Snappy transition with no overshoot. Content slides into place crisply."
+    usage: "Switching between MainBridge, PlanningDashboard, WaveManager, detail views"
+
+  modal_open:
+    time_delta: 0.01667
+    angular_frequency: 6.0
+    damping_ratio: 0.8        # slightly under-damped
+    feel: "Gentle bounce on arrival. Draws attention to the new overlay."
+    usage: "Admiral question modal, plan review overlay, help overlay entrance"
+
+  modal_close:
+    time_delta: 0.01667
+    angular_frequency: 10.0
+    damping_ratio: 1.0        # critically-damped
+    feel: "Fast, crisp dismissal. No lingering."
+    usage: "Closing any modal or overlay"
+
+  alert_pulse:
+    time_delta: 0.01667
+    angular_frequency: 4.0
+    damping_ratio: 0.3        # under-damped (bouncy)
+    feel: "Oscillating pulse that grabs attention. Multiple bounces before settling."
+    usage: "Red alert border pulse, error notification badge, stuck agent warning"
+
+  progress_smooth:
+    time_delta: 0.01667
+    angular_frequency: 5.0
+    damping_ratio: 1.2        # over-damped
+    feel: "Smooth, gradual approach to target value. No overshoot, no bounce."
+    usage: "Progress bar fill, wave completion animation, health indicator transitions"
+
+  spinner_bounce:
+    time_delta: 0.01667
+    angular_frequency: 6.0
+    damping_ratio: 0.6        # under-damped
+    feel: "Playful bounce for loading states. Charmbracelet-style energy."
+    usage: "Spinner animations during agent spawning, PRD parsing, gate execution"
+
+  # -- Star Trek Themed Animations ---------------------------------------------
+  # These use harmonica springs to drive multi-property character animations
+  # that evoke classic Trek visual effects in the terminal.
+
+  warp_engage:
+    time_delta: 0.01667
+    angular_frequency: 12.0
+    damping_ratio: 0.4        # under-damped (dramatic stretch)
+    feel: >
+      Two-phase warp effect: (1) content compresses horizontally while
+      stretching vertically (starfield stretch), then (2) snaps to target
+      with overshoot. Evokes the TNG warp jump -- stars streak into lines
+      then snap to new position.
+    usage: >
+      Mode transition planning->execution (commission approved = 'engage'),
+      ship launch, wave dispatch. The spring's overshoot creates the
+      characteristic 'rubber band snap' of entering warp.
+    implementation: |
+      Phase 1 (0ms-150ms): Spring drives content_scale_x from 1.0 -> 0.3
+        while content_scale_y goes 1.0 -> 1.4 (horizontal squeeze, vertical stretch).
+        Render star-streak characters (─ ═ ━) across viewport in butterscotch->white.
+      Phase 2 (150ms+): Spring releases, scale snaps to 1.0 with bounce.
+        New view renders as spring settles.
+
+  warp_decelerate:
+    time_delta: 0.01667
+    angular_frequency: 6.0
+    damping_ratio: 1.0        # critically-damped (smooth arrival)
+    feel: >
+      Reverse warp: content arrives stretched then compresses smoothly to
+      normal. Like dropping out of warp -- the destination materializes.
+    usage: "Arriving at a new screen after warp_engage, execution resume after pause"
+    implementation: |
+      Content starts with scale_x=0.3, scale_y=1.4, then spring drives
+      both to 1.0. Star-streak characters fade out as content normalizes.
+
+  beam_materialize:
+    time_delta: 0.01667
+    angular_frequency: 5.0
+    damping_ratio: 0.7        # under-damped (shimmer effect)
+    feel: >
+      Transporter beam-in: content materializes from a column of sparkle
+      characters top-to-bottom. Spring oscillation creates the characteristic
+      shimmer/phase effect of the transporter beam.
+    usage: >
+      Agent spawning animation (new agent card beams in), specialist appearing
+      in Ready Room, new mission card materializing in kanban column.
+    implementation: |
+      Render vertical column of shimmer chars (*, ., :, |) in gold/butterscotch
+      at the component's position. Spring drives opacity from 0.0 to 1.0 with
+      oscillation creating 2-3 flickers (shimmer). Content gradually replaces
+      shimmer chars top-to-bottom as spring value crosses thresholds.
+      Shimmer chars: ["*", ".", ":", "|", "~", "+"]
+
+  beam_dematerialize:
+    time_delta: 0.01667
+    angular_frequency: 7.0
+    damping_ratio: 0.7        # under-damped (shimmer out)
+    feel: >
+      Transporter beam-out: content dissolves into sparkle column bottom-to-top,
+      then fades. Reverse of beam_materialize.
+    usage: >
+      Agent completion/removal (agent card beams out), mission moving to done
+      column, specialist departing Ready Room.
+    implementation: |
+      Content replaced by shimmer chars bottom-to-top. Spring drives opacity
+      from 1.0 to 0.0 with oscillation creating farewell shimmer.
+      Final frame is empty space where component was.
+
+  red_alert_klaxon:
+    time_delta: 0.01667
+    angular_frequency: 3.0
+    damping_ratio: 0.15       # heavily under-damped (sustained oscillation)
+    feel: >
+      Red alert klaxon: border and background alternate between red_alert and
+      black in a sustained oscillation pattern. More urgent than alert_pulse --
+      this doesn't settle quickly. Evokes the bridge red alert lighting.
+    usage: >
+      Mission halted, agent death, system health critical, gate timeout.
+      Applied to the full screen border or specific panel border.
+    implementation: |
+      Spring oscillates between 0.0 and 1.0 with very low damping, creating
+      4-6 visible red flashes before settling. Interpolate border color between
+      black (#000000) and red_alert (#FF3333) using spring value as lerp factor.
+      Background tints dark_blue -> dark red (#330000) in sync.
+
+  shields_up:
+    time_delta: 0.01667
+    angular_frequency: 8.0
+    damping_ratio: 0.5        # under-damped (ripple effect)
+    feel: >
+      Shield activation ripple: border brightens from edges to center in a
+      ripple wave. Creates a brief 'energy shield' visual when a protective
+      action is taken.
+    usage: >
+      Gate passes (shield flash on GateResultRow), plan approved (shield
+      ripple on approval confirmation), successful merge (shield pulse
+      on wave progress bar).
+    implementation: |
+      Spring drives border_brightness from 1.0 to 2.0 then back to 1.0.
+      The overshoot creates a brief bright flash. Apply to border color by
+      interpolating toward space_white (#F5F6FA) using spring value > 1.0
+      as the intensity factor, then settling back to normal color.
+
+# -----------------------------------------------------------------------------
+# Breakpoints
+# -----------------------------------------------------------------------------
+
+breakpoints:
+  standard:
+    min_cols: 120
+    min_rows: 30
+    description: >
+      Full layout with side-by-side panels, complete log view (8-12 lines),
+      full mission titles, wave progress bars, dependency graph visible,
+      keyboard shortcut hints in panel headers.
+    layout_rules:
+      - "Mission Control and Mission Board render side-by-side (40%/60%)"
+      - "Engineering Logs show 8-12 lines"
+      - "Tactical Display shows 6+ phase entries"
+      - "Full mission/AC titles (no truncation)"
+      - "Wave progress bars with block characters"
+      - "Panel headers include [shortcut] hints"
+
+  compact:
+    trigger: "cols < 120 OR rows < 30"
+    description: >
+      Responsive degradation for smaller terminals. Panels stack vertically,
+      information density reduces, and some elements hide behind shortcuts.
+    layout_rules:
+      - "Mission Control and Mission Board stack vertically"
+      - "Engineering Logs reduce to 4 lines"
+      - "Tactical Display shows 3 phase entries"
+      - "Mission titles truncated to 30 chars"
+      - "Wave progress hides behind [w] shortcut"
+      - "Panel headers omit shortcut hints (use ? for help)"
+      - "Dependency graph hidden (available in detail view)"
+
+  minimum:
+    min_cols: 80
+    min_rows: 24
+    description: >
+      Absolute minimum terminal size. Below this, the TUI displays a
+      warning message asking the operator to resize. At 80x24, only the
+      most critical information renders: mission summary line, active
+      agent count, health indicator, and command input.
+    layout_rules:
+      - "Single-column layout only"
+      - "Header collapses to one line"
+      - "Only active panel visible (Tab switches between them)"
+      - "Engineering Logs show 2 lines"
+      - "No borders on panels (save horizontal space)"
+
+# -----------------------------------------------------------------------------
+# Component Tokens (assembled from above primitives)
+# -----------------------------------------------------------------------------
+
+components:
+  description: >
+    Pre-composed token sets for common components. Each component
+    definition references tokens from the sections above so that
+    Go code can look up a component name and get all its styling
+    properties in one struct.
+
+  panel_standard:
+    border: panel
+    padding: 1
+    margin: 0
+    title_style: subheader
+    content_style: label
+
+  panel_focused:
+    border: focused
+    padding: 1
+    margin: 0
+    title_style: subheader
+    content_style: label
+
+  panel_inactive:
+    border: inactive
+    padding: 1
+    margin: 0
+    title_style: value
+    content_style: value
+
+  modal_dialog:
+    border: modal
+    padding: 2
+    margin: 0
+    title_style: header
+    content_style: label
+
+  alert_banner:
+    border: alert
+    padding: 1
+    margin: 0
+    title_style: error_text
+    content_style: label
+    animation: alert_pulse
+
+  status_badge:
+    padding: 0
+    margin: 0
+    style: status
+
+  progress_bar:
+    filled_char: "\u2588"     # full block
+    empty_char: "\u2591"      # light shade
+    color_active: butterscotch
+    color_complete: green_ok
+    animation: progress_smooth
+
+  agent_card:
+    icon_running: "\u25B8"
+    icon_done: "\u2713"
+    icon_stuck: "\u26A0"
+    icon_waiting: "\u23F8"
+    id_max_length: 8
+    elapsed_format: "MM:SS"
+    style: label
+
+  header_bar:
+    background: dark_blue
+    text_style: header
+    separator: "\u2502"
+    padding: 0
+
+# =============================================================================
+# Library References
+# =============================================================================
+# Agents implementing from this file MUST use these exact imports and APIs.
+
+references:
+  - name: lipgloss
+    package: "github.com/charmbracelet/lipgloss"
+    version: ">=1.0.0"
+    url: "https://github.com/charmbracelet/lipgloss"
+    used_for: "All token application -- colors, borders, spacing, typography"
+    api_mapping:
+      colors:
+        - "lipgloss.Color(hex) -- palette hex values become lipgloss.Color"
+        - "lipgloss.AdaptiveColor{Light, Dark} -- adaptive.light/dark pairs"
+      borders:
+        - "lipgloss.RoundedBorder() -- panel border"
+        - "lipgloss.DoubleBorder() -- modal border"
+        - "lipgloss.ThickBorder() -- alert border"
+        - "lipgloss.NormalBorder() -- inactive border"
+      spacing:
+        - "style.Padding(top, right, bottom, left)"
+        - "style.Margin(top, right, bottom, left)"
+      typography:
+        - "style.Bold(true) -- header, emphasis"
+        - "style.Underline(true) -- subheader"
+        - "style.Faint(true) -- help_text"
+        - "style.Foreground(lipgloss.Color(hex))"
+      borders_color:
+        - "style.BorderForeground(lipgloss.Color(hex))"
+
+  - name: harmonica
+    package: "github.com/charmbracelet/harmonica"
+    version: ">=0.2.0"
+    url: "https://github.com/charmbracelet/harmonica"
+    used_for: "Animation spring configurations in animations section"
+    api_mapping:
+      springs:
+        - "harmonica.NewSpring(frequency, dampingRatio) -- each animation entry"
+        - "spring.Update(targetValue, velocity, deltaTime) -- per-frame tick"

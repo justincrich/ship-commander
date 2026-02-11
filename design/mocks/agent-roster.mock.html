@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Roster - Ship Commander 3</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #1a1a2e;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .terminal-frame {
+            max-width: 1100px;
+            width: 100%;
+            border-radius: 8px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+            overflow: hidden;
+        }
+
+        .title-bar {
+            background: #2D2D2D;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .title-bar-buttons {
+            display: flex;
+            gap: 8px;
+            margin-right: 16px;
+        }
+
+        .title-bar-button {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .title-bar-button.red { background: #FF5F56; }
+        .title-bar-button.yellow { background: #FFBD2E; }
+        .title-bar-button.green { background: #27C93F; }
+
+        .title-bar-text {
+            flex: 1;
+            text-align: center;
+            color: #C4C4C4;
+            font-size: 13px;
+            letter-spacing: 0.5px;
+        }
+
+        .terminal-body {
+            background: #000000;
+            color: #F5F6FA;
+            padding: 20px;
+            font-size: 13px;
+            line-height: 1.4;
+            border-radius: 0 0 8px 8px;
+        }
+
+        .header {
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #52526A;
+        }
+
+        .header-title {
+            color: #FF9966;
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 6px;
+        }
+
+        .header-stats {
+            color: #F5F6FA;
+            display: flex;
+            gap: 24px;
+            font-size: 12px;
+        }
+
+        .stat-label {
+            color: #9999CC;
+        }
+
+        .stat-value {
+            color: #F5F6FA;
+            font-weight: bold;
+        }
+
+        .badge {
+            background: #FF99CC;
+            color: #000000;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-weight: bold;
+            font-size: 11px;
+        }
+
+        .filter-bar {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 16px;
+            padding: 8px 12px;
+            background: rgba(27, 79, 143, 0.15);
+            border: 1px solid #52526A;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .filter-label {
+            color: #9999CC;
+        }
+
+        .filter-option {
+            color: #52526A;
+        }
+
+        .filter-option.active {
+            color: #FF9966;
+            font-weight: bold;
+        }
+
+        .agent-grid {
+            margin-bottom: 16px;
+        }
+
+        .grid-header {
+            color: #FF9966;
+            font-weight: bold;
+            padding: 8px 12px;
+            border-bottom: 1px solid #52526A;
+            margin-bottom: 4px;
+            display: flex;
+            gap: 12px;
+        }
+
+        .agent-row {
+            padding: 6px 12px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-left: 3px solid transparent;
+        }
+
+        .agent-row:hover {
+            background: rgba(153, 102, 255, 0.1);
+        }
+
+        .agent-row.selected {
+            background: rgba(153, 102, 255, 0.25);
+            border-left-color: #9966FF;
+        }
+
+        .col-status { width: 30px; text-align: center; }
+        .col-agent { width: 160px; font-weight: bold; }
+        .col-role { width: 110px; }
+        .col-ship { width: 160px; color: #9999CC; }
+        .col-mission { width: 140px; color: #CCCCCC; }
+        .col-phase { width: 100px; }
+        .col-time { width: 80px; color: #CCCCCC; }
+        .col-harness { width: 100px; color: #52526A; font-size: 11px; }
+
+        .status-active { color: #FF9966; }
+        .status-idle { color: #CCCCCC; }
+        .status-done { color: #33FF33; }
+        .status-stuck { color: #FFCC00; }
+        .status-halted { color: #FF3333; }
+
+        .role-captain { color: #FFAA00; }
+        .role-commander { color: #9999CC; }
+        .role-implementer { color: #FF9966; }
+        .role-reviewer { color: #CC99CC; }
+        .role-design { color: #FF99CC; }
+
+        .phase-red { color: #FF3333; }
+        .phase-green { color: #33FF33; }
+        .phase-review { color: #CC99CC; }
+        .phase-planning { color: #9999CC; }
+        .phase-done { color: #33FF33; }
+
+        .border-row {
+            border-top: 1px solid #52526A;
+            padding-top: 4px;
+            margin-top: 4px;
+            color: #52526A;
+            padding: 4px 12px;
+            font-size: 11px;
+        }
+
+        .navigable-toolbar {
+            padding: 12px;
+            background: rgba(27, 79, 143, 0.2);
+            border-radius: 4px;
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            border: 1px solid #52526A;
+        }
+
+        .toolbar-button .key {
+            color: #9966FF;
+            font-weight: bold;
+            background: rgba(153, 102, 255, 0.2);
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-right: 4px;
+        }
+
+        .toolbar-button .label {
+            color: #FF9966;
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal-frame">
+        <div class="title-bar">
+            <div class="title-bar-buttons">
+                <div class="title-bar-button red"></div>
+                <div class="title-bar-button yellow"></div>
+                <div class="title-bar-button green"></div>
+            </div>
+            <div class="title-bar-text">ship-commander-3 — Agent Roster</div>
+        </div>
+        <div class="terminal-body">
+            <!-- Header -->
+            <div class="header">
+                <div class="header-title">╭─ AGENT ROSTER ──────────────────────────────────────────────────────────────────────────────────────╮</div>
+                <div class="header-stats">
+                    <span><span class="stat-label">Total Agents:</span> <span class="stat-value">12</span></span>
+                    <span><span class="stat-label">Active:</span> <span class="stat-value">7</span></span>
+                    <span><span class="stat-label">Idle:</span> <span class="stat-value">3</span></span>
+                    <span><span class="stat-label">Stuck:</span> <span class="badge">2</span></span>
+                </div>
+            </div>
+
+            <!-- Filter Bar -->
+            <div class="filter-bar">
+                <span class="filter-label">Filter:</span>
+                <span class="filter-option active">All</span>
+                <span class="filter-option">Active</span>
+                <span class="filter-option">Idle</span>
+                <span class="filter-option">Stuck</span>
+                <span class="filter-label" style="margin-left: 24px;">Ship:</span>
+                <span class="filter-option active">All Ships</span>
+                <span class="filter-option">Enterprise</span>
+                <span class="filter-option">Nautilus</span>
+                <span class="filter-option">Discovery</span>
+            </div>
+
+            <!-- Agent Grid -->
+            <div class="agent-grid">
+                <div class="grid-header">
+                    <span class="col-status"></span>
+                    <span class="col-agent">AGENT</span>
+                    <span class="col-role">ROLE</span>
+                    <span class="col-ship">SHIP</span>
+                    <span class="col-mission">MISSION</span>
+                    <span class="col-phase">PHASE</span>
+                    <span class="col-time">TIME</span>
+                    <span class="col-harness">HARNESS</span>
+                </div>
+
+                <div class="agent-row selected">
+                    <span class="col-status status-active">[>]</span>
+                    <span class="col-agent">capt-alpha</span>
+                    <span class="col-role role-captain">captain</span>
+                    <span class="col-ship">SS Enterprise</span>
+                    <span class="col-mission">MISSION-01</span>
+                    <span class="col-phase phase-planning">PLANNING</span>
+                    <span class="col-time">04:12</span>
+                    <span class="col-harness">claude</span>
+                </div>
+
+                <div class="agent-row">
+                    <span class="col-status status-active">[>]</span>
+                    <span class="col-agent">impl-bravo</span>
+                    <span class="col-role role-implementer">implementer</span>
+                    <span class="col-ship">SS Enterprise</span>
+                    <span class="col-mission">MISSION-03</span>
+                    <span class="col-phase phase-red">RED</span>
+                    <span class="col-time">02:15</span>
+                    <span class="col-harness">codex</span>
+                </div>
+
+                <div class="agent-row">
+                    <span class="col-status status-active">[>]</span>
+                    <span class="col-agent">impl-charlie</span>
+                    <span class="col-role role-implementer">implementer</span>
+                    <span class="col-ship">SS Enterprise</span>
+                    <span class="col-mission">MISSION-04</span>
+                    <span class="col-phase phase-green">GREEN</span>
+                    <span class="col-time">01:45</span>
+                    <span class="col-harness">codex</span>
+                </div>
+
+                <div class="agent-row">
+                    <span class="col-status status-active">[>]</span>
+                    <span class="col-agent">rev-delta</span>
+                    <span class="col-role role-reviewer">reviewer</span>
+                    <span class="col-ship">SS Enterprise</span>
+                    <span class="col-mission">MISSION-05</span>
+                    <span class="col-phase phase-review">REVIEW</span>
+                    <span class="col-time">00:30</span>
+                    <span class="col-harness">claude</span>
+                </div>
+
+                <div class="agent-row">
+                    <span class="col-status status-active">[>]</span>
+                    <span class="col-agent">capt-echo</span>
+                    <span class="col-role role-captain">captain</span>
+                    <span class="col-ship">Nautilus</span>
+                    <span class="col-mission">MISSION-10</span>
+                    <span class="col-phase phase-planning">PLANNING</span>
+                    <span class="col-time">01:00</span>
+                    <span class="col-harness">claude</span>
+                </div>
+
+                <div class="agent-row">
+                    <span class="col-status status-active">[>]</span>
+                    <span class="col-agent">impl-foxtrot</span>
+                    <span class="col-role role-implementer">implementer</span>
+                    <span class="col-ship">Nautilus</span>
+                    <span class="col-mission">MISSION-11</span>
+                    <span class="col-phase phase-green">GREEN</span>
+                    <span class="col-time">03:20</span>
+                    <span class="col-harness">opencode</span>
+                </div>
+
+                <div class="agent-row">
+                    <span class="col-status status-stuck">[~]</span>
+                    <span class="col-agent">impl-golf</span>
+                    <span class="col-role role-implementer">implementer</span>
+                    <span class="col-ship">Nautilus</span>
+                    <span class="col-mission">MISSION-12</span>
+                    <span class="col-phase phase-red">RED</span>
+                    <span class="col-time">05:45</span>
+                    <span class="col-harness">codex</span>
+                </div>
+
+                <div class="agent-row">
+                    <span class="col-status status-active">[>]</span>
+                    <span class="col-agent">design-hotel</span>
+                    <span class="col-role role-design">design officer</span>
+                    <span class="col-ship">Discovery</span>
+                    <span class="col-mission">MISSION-20</span>
+                    <span class="col-phase phase-planning">PLANNING</span>
+                    <span class="col-time">00:15</span>
+                    <span class="col-harness">claude</span>
+                </div>
+
+                <div class="agent-row">
+                    <span class="col-status status-idle">[.]</span>
+                    <span class="col-agent">impl-india</span>
+                    <span class="col-role role-implementer">implementer</span>
+                    <span class="col-ship">Discovery</span>
+                    <span class="col-mission">--</span>
+                    <span class="col-phase" style="color: #CCCCCC;">IDLE</span>
+                    <span class="col-time">--</span>
+                    <span class="col-harness">codex</span>
+                </div>
+
+                <div class="agent-row">
+                    <span class="col-status status-idle">[.]</span>
+                    <span class="col-agent">impl-juliet</span>
+                    <span class="col-role role-implementer">implementer</span>
+                    <span class="col-ship">Discovery</span>
+                    <span class="col-mission">--</span>
+                    <span class="col-phase" style="color: #CCCCCC;">IDLE</span>
+                    <span class="col-time">--</span>
+                    <span class="col-harness">opencode</span>
+                </div>
+
+                <div class="agent-row">
+                    <span class="col-status status-stuck">[~]</span>
+                    <span class="col-agent">rev-kilo</span>
+                    <span class="col-role role-reviewer">reviewer</span>
+                    <span class="col-ship">Discovery</span>
+                    <span class="col-mission">MISSION-21</span>
+                    <span class="col-phase phase-review">REVIEW</span>
+                    <span class="col-time">06:10</span>
+                    <span class="col-harness">claude</span>
+                </div>
+
+                <div class="agent-row">
+                    <span class="col-status status-idle">[.]</span>
+                    <span class="col-agent">cmdr-lima</span>
+                    <span class="col-role role-commander">commander</span>
+                    <span class="col-ship">Discovery</span>
+                    <span class="col-mission">--</span>
+                    <span class="col-phase" style="color: #CCCCCC;">IDLE</span>
+                    <span class="col-time">--</span>
+                    <span class="col-harness">claude</span>
+                </div>
+
+                <div class="border-row">
+                    Showing 12 of 12 agents │ [>] Active: 7  [.] Idle: 3  [~] Stuck: 2
+                </div>
+            </div>
+
+            <!-- Navigable Toolbar -->
+            <div class="navigable-toolbar">
+                <span class="toolbar-button">
+                    <span class="key">Enter</span>
+                    <span class="label">Agent Detail</span>
+                </span>
+                <span class="toolbar-button">
+                    <span class="key">f</span>
+                    <span class="label">Filter</span>
+                </span>
+                <span class="toolbar-button">
+                    <span class="key">s</span>
+                    <span class="label">Sort</span>
+                </span>
+                <span class="toolbar-button">
+                    <span class="key">?</span>
+                    <span class="label">Help</span>
+                </span>
+                <span class="toolbar-button">
+                    <span class="key">Esc</span>
+                    <span class="label">Fleet</span>
+                </span>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

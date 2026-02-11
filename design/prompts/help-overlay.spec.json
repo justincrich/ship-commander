@@ -1,0 +1,72 @@
+{
+  "design_key": "help-overlay",
+  "name": "Help Overlay",
+  "version": "2.0",
+  "description": "Context-aware help overlay showing keyboard shortcuts organized by section. Available from any screen via '?' key. Toggles on/off without pushing to navigation stack.",
+  "screen": {
+    "type": "global",
+    "parent": "app-root",
+    "children": [],
+    "mode_availability": { "basic": true, "advanced": true, "executive": true },
+    "mode_differences": {
+      "basic": ["Shows only context-relevant shortcuts with descriptive text", "Grouped into simple categories"],
+      "advanced": ["Shows all keybindings with full context grouping", "Includes show_all toggle"],
+      "executive": ["Same as basic"]
+    }
+  },
+  "layout": {
+    "structure": "HelpTitle | KeybindingSections | DismissHint",
+    "overlay": {
+      "width": "70%",
+      "height": "auto",
+      "position": "centered",
+      "background": "dimmed underlying view",
+      "animation": {
+        "open": "modal_open (freq=6.0, ratio=0.8) -- fades in with bounce",
+        "close": "modal_close (freq=10.0, ratio=1.0) -- fades out fast"
+      }
+    },
+    "rows": [
+      { "name": "title", "height": 2, "panels": [
+        { "id": "help-title", "width": "100%", "description": "'KEYBOARD SHORTCUTS' in bold butterscotch. 'Context: <active view name>' in dim light_gray text below." }
+      ]},
+      { "name": "sections", "height": "auto", "panels": [
+        { "id": "keybinding-sections", "width": "100%", "description": "Sections organized by context. GLOBAL: Tab, Shift+Tab, Enter, Escape, ?, q, Ctrl+C. NAVIGATION: arrow keys, Page Up/Down. ACTIONS: context-specific shortcuts (varies by active view). Keys shown in butterscotch. Descriptions in space_white. Section headers in ice. Columns auto-sized to terminal width." }
+      ]},
+      { "name": "dismiss", "height": 1, "panels": [
+        { "id": "dismiss-hint", "width": "100%", "description": "'Press ? or Escape to close' centered in dim light_gray." }
+      ]}
+    ],
+    "responsive": {
+      "standard": { "min_width": 80, "description": "Full grouped layout with columns for key and description" },
+      "compact": { "threshold": "<80 cols", "description": "Single-column layout. Keys and descriptions stack. Fewer sections shown." }
+    }
+  },
+  "components": [
+    { "name": "ModalOverlay", "charm_base": "lipgloss.Place + lipgloss.NewStyle().Border(lipgloss.DoubleBorder())", "tokens_used": ["ice", "space_white", "bg_modal"], "variants": ["help"] },
+    { "name": "HelpOverlay", "charm_base": "bubbles.help + bubbles.key", "tokens_used": ["ice", "butterscotch", "space_white", "light_gray", "galaxy_gray"], "variants": ["short", "full"] }
+  ],
+  "data_sources": [
+    { "source": "active_view", "description": "Current view for context-aware shortcut filtering" },
+    { "source": "key_bindings", "description": "Registered keybindings from bubbles.key across all views" }
+  ],
+  "keyboard": {
+    "global": {},
+    "view_specific": { "?": "Close help overlay", "Escape": "Close help overlay" },
+    "toolbar_buttons": []
+  },
+  "transitions": [
+    { "from": "any", "to": "help-overlay", "trigger": "Press '?'", "type": "overlay_toggle", "animation": { "preset": "modal_open", "property": "opacity + scale" } },
+    { "to": "previous", "trigger": "Press '?' or Escape", "type": "overlay_toggle", "animation": { "preset": "modal_close", "property": "opacity + scale" } }
+  ],
+  "special_behavior": [
+    { "trigger": "Help opened from Fleet Overview", "behavior": "Shows Fleet Overview shortcuts: n (new ship), d (directive), r (roster), i (inbox), l (launch), p (settings), m (monitor)." },
+    { "trigger": "Help opened from Ship Bridge", "behavior": "Shows Ship Bridge shortcuts: p (plan), l (launch), a (agent detail), h (halt), r (retry), w (wave manager), d (directive), Space (pause/resume)." },
+    { "trigger": "Cannot open while modal active", "behavior": "Help overlay blocked when AdmiralQuestionModal or ConfirmDialog is active. No visual feedback -- key simply ignored." }
+  ],
+  "tokens": {
+    "colors": { "primary": "ice", "accent": "butterscotch" },
+    "borders": { "default": "lipgloss.DoubleBorder() in ice" },
+    "icons": {}
+  }
+}
