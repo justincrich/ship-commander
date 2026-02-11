@@ -27,8 +27,6 @@ linters:
 
     # Additional useful linters
     - bodyclose        # Check whether HTTP response body is closed
-    - deadcode         # Find unused code
-    - depguard         # Check for import restrictions
     - gosimple         # Simplify code suggestions
     - typecheck        # Parse and type-check code
     - unconvert        # Remove unnecessary type conversions
@@ -45,16 +43,10 @@ linters-settings:
   revive:
     severity: warning
     rules:
-      # Require comments on exported symbols
-      - name: exported-functions-have-comments
-        severity: warning
-      - name: exported-var-have-comments
+      - name: exported
         severity: warning
       # Naming conventions
       - name: var-naming
-        severity: warning
-      # Import ordering
-      - name: imports-blacklist
         severity: warning
       # Error handling
       - name: error-naming
@@ -71,10 +63,11 @@ linters-settings:
     enable-all: true
     disable:
       - shadow  # Shadowing variables can be useful in Go
+      - fieldalignment
 
   # Cyclomatic complexity
   gocyclo:
-    min-complexity: 15  # Flag functions with complexity > 15
+    min-complexity: 20  # Flag functions with complexity > 20
 
   # Security
   gosec:

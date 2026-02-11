@@ -4,15 +4,15 @@
 // following the Ship Commander 3 coding standards.
 //
 // Reference: .spec/research-findings/GO_CODING_STANDARDS.md
-package test_example
+package test
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/justinrich/ship-commander-3/test"
 )
 
 // Example function to test
@@ -145,34 +145,34 @@ func TestDivide(t *testing.T) {
 // Shows how to test string processing with various edge cases
 func TestProcessString(t *testing.T) {
 	tests := []struct {
-		name        string
-		input       string
-		expected    string
-		wantError   bool
-		errorCheck  func(*testing.T, error) // Optional custom error check
+		name       string
+		input      string
+		expected   string
+		wantError  bool
+		errorCheck func(*testing.T, error) // Optional custom error check
 	}{
 		{
-			name:     "short string",
-			input:    "hello",
-			expected: "hello",
+			name:      "short string",
+			input:     "hello",
+			expected:  "hello",
 			wantError: false,
 		},
 		{
-			name:     "exact 10 characters",
-			input:    "0123456789",
-			expected: "0123456789",
+			name:      "exact 10 characters",
+			input:     "0123456789",
+			expected:  "0123456789",
 			wantError: false,
 		},
 		{
-			name:     "long string gets truncated",
-			input:    "this is a very long string",
-			expected: "this is a ",
+			name:      "long string gets truncated",
+			input:     "this is a very long string",
+			expected:  "this is a ",
 			wantError: false,
 		},
 		{
-			name:     "empty string returns error",
-			input:    "",
-			expected: "",
+			name:      "empty string returns error",
+			input:     "",
+			expected:  "",
 			wantError: true,
 			errorCheck: func(t *testing.T, err error) {
 				t.Helper()
@@ -204,19 +204,19 @@ func TestProcessString(t *testing.T) {
 // Shows how to use shared test utilities from the test package
 func TestUsingTestHelpers(t *testing.T) {
 	t.Run("temp dir", func(t *testing.T) {
-		dir := test.TempDir(t)
-		test.AssertFileExists(t, dir)
+		dir := TempDir(t)
+		AssertFileExists(t, dir)
 	})
 
 	t.Run("temp file", func(t *testing.T) {
 		content := "test content"
-		filePath := test.TempFile(t, content)
-		test.AssertFileExists(t, filePath)
-		test.AssertFileContent(t, filePath, content)
+		filePath := TempFile(t, content)
+		AssertFileExists(t, filePath)
+		AssertFileContent(t, filePath, content)
 	})
 
 	t.Run("context", func(t *testing.T) {
-		ctx := test.Context(t)
+		ctx := Context(t)
 		assert.NotNil(t, ctx)
 	})
 }
@@ -226,7 +226,7 @@ func TestUsingTestHelpers(t *testing.T) {
 // Shows how to safely run tests in parallel
 func TestParallel(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		input int
 	}{
 		{name: "test 1", input: 1},
@@ -250,7 +250,7 @@ func TestParallel(t *testing.T) {
 //
 // Useful for tests that are slow or have external dependencies
 func TestSkipInShortMode(t *testing.T) {
-	test.SkipIfShort(t)
+	SkipIfShort(t)
 
 	// This test only runs when -short flag is NOT provided
 	// Example: integration test with external services

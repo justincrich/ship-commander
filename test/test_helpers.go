@@ -31,7 +31,8 @@ func TempDir(t *testing.T) string {
 	dir, err := os.MkdirTemp("", "sc3-test-*")
 	require.NoError(t, err, "failed to create temp dir")
 	t.Cleanup(func() {
-		os.RemoveAll(dir)
+		removeErr := os.RemoveAll(dir)
+		assert.NoError(t, removeErr, "failed to remove temp dir")
 	})
 	return dir
 }
@@ -42,7 +43,7 @@ func TempFile(t *testing.T, content string) string {
 	t.Helper()
 	dir := TempDir(t)
 	path := filepath.Join(dir, "test.txt")
-	err := os.WriteFile(path, []byte(content), 0644)
+	err := os.WriteFile(path, []byte(content), 0o600)
 	require.NoError(t, err, "failed to write temp file")
 	return path
 }
@@ -92,6 +93,7 @@ func AssertFileNotExists(t *testing.T, path string) {
 // AssertFileContent checks if a file has the expected content
 func AssertFileContent(t *testing.T, path, expectedContent string) {
 	t.Helper()
+	// #nosec G304 -- path comes from test setup and is controlled by callers.
 	content, err := os.ReadFile(path)
 	require.NoError(t, err, "failed to read file: %s", path)
 	assert.Equal(t, expectedContent, string(content), "file content mismatch")
@@ -105,7 +107,7 @@ func SkipIfShort(t *testing.T) {
 	}
 }
 
-// TableDrivenTest is a helper for table-driven tests
+// TableTest is a helper for table-driven tests
 // Example usage:
 //
 //	tests := []TableTest{
