@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestNewDefaultAppModelStartsOnFleetOverview(t *testing.T) {
@@ -32,5 +34,40 @@ func TestDefaultViewDefinitionsIncludeFleetOverviewFocusOrder(t *testing.T) {
 	}
 	if definition.FocusOrder[0] != "ship_list_panel" {
 		t.Fatalf("first focused panel = %q, want ship_list_panel", definition.FocusOrder[0])
+	}
+}
+
+func TestDefaultViewDefinitionsIncludeShipBridgeFocusOrder(t *testing.T) {
+	t.Parallel()
+
+	definitions := DefaultViewDefinitions()
+	definition, ok := definitions[ViewShipBridge]
+	if !ok {
+		t.Fatalf("missing %q view definition", ViewShipBridge)
+	}
+	if len(definition.FocusOrder) != 4 {
+		t.Fatalf("ship bridge focus order length = %d, want 4", len(definition.FocusOrder))
+	}
+	if definition.FocusOrder[0] != "crew_panel" {
+		t.Fatalf("first ship bridge focus panel = %q, want crew_panel", definition.FocusOrder[0])
+	}
+}
+
+func TestDefaultModelEnterNavigatesToShipBridge(t *testing.T) {
+	t.Parallel()
+
+	model := NewDefaultAppModel()
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	typed, ok := next.(*AppModel)
+	if !ok {
+		t.Fatalf("update return type = %T, want *AppModel", next)
+	}
+	if got := typed.CurrentView(); got != ViewShipBridge {
+		t.Fatalf("current view after enter = %q, want %q", got, ViewShipBridge)
+	}
+
+	rendered := typed.View()
+	if !strings.Contains(rendered, "Mission Board") {
+		t.Fatalf("expected ship bridge render after enter, got:\n%s", rendered)
 	}
 }
