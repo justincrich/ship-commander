@@ -56,7 +56,17 @@ const (
 	ApprovalDecisionFeedback ApprovalDecision = "Feedback"
 	// ApprovalDecisionShelved means the plan is persisted and paused.
 	ApprovalDecisionShelved ApprovalDecision = "Shelved"
+	// ApprovalDecisionHalted means execution is halted by Admiral decision.
+	ApprovalDecisionHalted ApprovalDecision = "Halted"
 )
+
+// WaveReview carries completed-wave review context and demo evidence.
+//
+//nolint:revive // Field names follow the issue contract.
+type WaveReview struct {
+	WaveIndex  int
+	DemoTokens map[string]string
+}
 
 // ApprovalRequest is the manifest approval payload presented to Admiral.
 //
@@ -68,6 +78,7 @@ type ApprovalRequest struct {
 	CoverageMap     map[string]CoverageStatus
 	Iteration       int
 	MaxIterations   int
+	WaveReview      *WaveReview
 }
 
 // ApprovalResponse is the Admiral decision payload for manifest review.
@@ -199,6 +210,7 @@ func normalizeApprovalRequest(request ApprovalRequest) (ApprovalRequest, error) 
 		coverage[trimmedID] = normalizeCoverageStatus(status)
 	}
 	request.CoverageMap = coverage
+	request.WaveReview = normalizeWaveReview(request.WaveReview)
 
 	if request.Iteration <= 0 {
 		request.Iteration = 1
@@ -244,6 +256,34 @@ func normalizeWaves(waves []Wave) []Wave {
 	return normalized
 }
 
+func normalizeWaveReview(review *WaveReview) *WaveReview {
+	if review == nil {
+		return nil
+	}
+
+	if review.WaveIndex <= 0 {
+		return nil
+	}
+
+	demoTokens := make(map[string]string, len(review.DemoTokens))
+	for missionID, token := range review.DemoTokens {
+		missionID = strings.TrimSpace(missionID)
+		if missionID == "" {
+			continue
+		}
+		token = strings.TrimSpace(token)
+		if token == "" {
+			continue
+		}
+		demoTokens[missionID] = token
+	}
+
+	return &WaveReview{
+		WaveIndex:  review.WaveIndex,
+		DemoTokens: demoTokens,
+	}
+}
+
 func normalizeStringSlice(values []string) []string {
 	normalized := make([]string, 0, len(values))
 	for _, value := range values {
@@ -279,6 +319,8 @@ func normalizeApprovalResponse(response ApprovalResponse) (ApprovalResponse, err
 		response.Decision = ApprovalDecisionFeedback
 	case strings.ToLower(string(ApprovalDecisionShelved)):
 		response.Decision = ApprovalDecisionShelved
+	case strings.ToLower(string(ApprovalDecisionHalted)):
+		response.Decision = ApprovalDecisionHalted
 	default:
 		return ApprovalResponse{}, fmt.Errorf("invalid approval decision %q", response.Decision)
 	}

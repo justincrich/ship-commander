@@ -433,6 +433,15 @@ func TestCommanderExecuteEnforcesWIPLimit(t *testing.T) {
 func TestCommanderExecuteUsesDependencyOrderAcrossWaves(t *testing.T) {
 	t.Parallel()
 
+	m1Path := filepath.Join(t.TempDir(), "m1")
+	if err := os.MkdirAll(filepath.Join(m1Path, "demo"), 0o750); err != nil {
+		t.Fatalf("create m1 demo dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(m1Path, "demo", "MISSION-m1.md"), []byte("# demo evidence"), 0o600); err != nil {
+		t.Fatalf("write m1 demo token: %v", err)
+	}
+	m2Path := filepath.Join(t.TempDir(), "m2")
+
 	sequence := make([]string, 0)
 	store := &fakeManifestStore{
 		manifest: []Mission{
@@ -446,8 +455,8 @@ func TestCommanderExecuteUsesDependencyOrderAcrossWaves(t *testing.T) {
 	}
 	worktrees := &fakeWorktreeManager{
 		paths: map[string]string{
-			"m1": "/tmp/worktree/m1",
-			"m2": "/tmp/worktree/m2",
+			"m1": m1Path,
+			"m2": m2Path,
 		},
 	}
 	locks := &fakeSurfaceLocker{}
@@ -473,6 +482,246 @@ func TestCommanderExecuteUsesDependencyOrderAcrossWaves(t *testing.T) {
 			"dispatch sequence = %v, want [dispatch:m1 review:m1 dispatch:m2 review:m2]",
 			sequence,
 		)
+	}
+}
+
+func TestCommanderExecuteTriggersWaveReviewCheckpointAndContinues(t *testing.T) {
+	t.Parallel()
+
+	m1Path := filepath.Join(t.TempDir(), "m1")
+	if err := os.MkdirAll(filepath.Join(m1Path, "demo"), 0o750); err != nil {
+		t.Fatalf("create m1 demo dir: %v", err)
+	}
+	m1Evidence := "# MISSION-m1 demo evidence"
+	if err := os.WriteFile(filepath.Join(m1Path, "demo", "MISSION-m1.md"), []byte(m1Evidence), 0o600); err != nil {
+		t.Fatalf("write m1 demo token: %v", err)
+	}
+
+	store := &fakeManifestStore{
+		manifest: []Mission{
+			{ID: "m1", Title: "First"},
+			{ID: "m2", Title: "Second", DependsOn: []string{"m1"}},
+		},
+		ready: [][]string{
+			{"m1", "m2"},
+			{"m1", "m2"},
+		},
+	}
+	worktrees := &fakeWorktreeManager{
+		paths: map[string]string{
+			"m1": m1Path,
+			"m2": filepath.Join(t.TempDir(), "m2"),
+		},
+	}
+	locks := &fakeSurfaceLocker{}
+	harness := &fakeHarness{}
+	verifier := &fakeVerifier{}
+	demoTokens := &fakeDemoTokenValidator{}
+	events := &fakeEventPublisher{}
+	approval := &fakeApprovalGate{
+		responses: []admiral.ApprovalResponse{
+			{Decision: admiral.ApprovalDecisionApproved},
+			{Decision: admiral.ApprovalDecisionApproved},
+		},
+	}
+	feedback := &fakeFeedbackInjector{}
+	shelver := &fakePlanShelver{}
+
+	cmd, err := New(
+		store,
+		worktrees,
+		locks,
+		harness,
+		verifier,
+		demoTokens,
+		approval,
+		feedback,
+		shelver,
+		events,
+		CommanderConfig{WIPLimit: 2},
+	)
+	if err != nil {
+		t.Fatalf("new commander: %v", err)
+	}
+
+	if err := cmd.Execute(context.Background(), "commission-1"); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if approval.callCount != 2 {
+		t.Fatalf("approval calls = %d, want 2 (manifest + wave review)", approval.callCount)
+	}
+	if len(approval.requests) != 2 {
+		t.Fatalf("approval requests = %d, want 2", len(approval.requests))
+	}
+	waveReviewReq := approval.requests[1]
+	if waveReviewReq.WaveReview == nil {
+		t.Fatal("wave review request should include WaveReview payload")
+	}
+	if waveReviewReq.WaveReview.WaveIndex != 1 {
+		t.Fatalf("wave review index = %d, want 1", waveReviewReq.WaveReview.WaveIndex)
+	}
+	if got := waveReviewReq.WaveReview.DemoTokens["m1"]; got != m1Evidence {
+		t.Fatalf("wave review demo token for m1 = %q, want %q", got, m1Evidence)
+	}
+	if len(harness.implementerDispatches) != 2 {
+		t.Fatalf("implementer dispatches = %d, want 2 (wave2 should continue)", len(harness.implementerDispatches))
+	}
+}
+
+func TestCommanderExecuteInjectsWaveFeedbackIntoNextWaveDispatch(t *testing.T) {
+	t.Parallel()
+
+	m1Path := filepath.Join(t.TempDir(), "m1")
+	if err := os.MkdirAll(filepath.Join(m1Path, "demo"), 0o750); err != nil {
+		t.Fatalf("create m1 demo dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(m1Path, "demo", "MISSION-m1.md"), []byte("# m1 demo evidence"), 0o600); err != nil {
+		t.Fatalf("write m1 demo token: %v", err)
+	}
+
+	store := &fakeManifestStore{
+		manifest: []Mission{
+			{ID: "m1", Title: "First"},
+			{ID: "m2", Title: "Second", DependsOn: []string{"m1"}},
+		},
+		ready: [][]string{
+			{"m1", "m2"},
+			{"m1", "m2"},
+		},
+	}
+	worktrees := &fakeWorktreeManager{
+		paths: map[string]string{
+			"m1": m1Path,
+			"m2": filepath.Join(t.TempDir(), "m2"),
+		},
+	}
+	locks := &fakeSurfaceLocker{}
+	harness := &fakeHarness{}
+	verifier := &fakeVerifier{}
+	demoTokens := &fakeDemoTokenValidator{}
+	events := &fakeEventPublisher{}
+	approval := &fakeApprovalGate{
+		responses: []admiral.ApprovalResponse{
+			{Decision: admiral.ApprovalDecisionApproved},
+			{Decision: admiral.ApprovalDecisionFeedback, FeedbackText: "focus on reliability checks"},
+		},
+	}
+	feedback := &fakeFeedbackInjector{}
+	shelver := &fakePlanShelver{}
+
+	cmd, err := New(
+		store,
+		worktrees,
+		locks,
+		harness,
+		verifier,
+		demoTokens,
+		approval,
+		feedback,
+		shelver,
+		events,
+		CommanderConfig{WIPLimit: 2},
+	)
+	if err != nil {
+		t.Fatalf("new commander: %v", err)
+	}
+
+	if err := cmd.Execute(context.Background(), "commission-1"); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(harness.implementerDispatches) != 2 {
+		t.Fatalf("implementer dispatches = %d, want 2", len(harness.implementerDispatches))
+	}
+	if harness.implementerDispatches[1].WaveFeedback != "focus on reliability checks" {
+		t.Fatalf("wave feedback = %q, want propagated feedback", harness.implementerDispatches[1].WaveFeedback)
+	}
+
+	foundWaveFeedbackEvent := false
+	for _, event := range events.events {
+		if event.Type == EventWaveFeedbackRecorded && event.WaveIndex == 1 {
+			foundWaveFeedbackEvent = true
+			break
+		}
+	}
+	if !foundWaveFeedbackEvent {
+		t.Fatal("expected wave feedback event to be published")
+	}
+}
+
+func TestCommanderExecuteHaltsOnWaveReviewHaltDecision(t *testing.T) {
+	t.Parallel()
+
+	m1Path := filepath.Join(t.TempDir(), "m1")
+	if err := os.MkdirAll(filepath.Join(m1Path, "demo"), 0o750); err != nil {
+		t.Fatalf("create m1 demo dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(m1Path, "demo", "MISSION-m1.md"), []byte("# m1 demo evidence"), 0o600); err != nil {
+		t.Fatalf("write m1 demo token: %v", err)
+	}
+
+	store := &fakeManifestStore{
+		manifest: []Mission{
+			{ID: "m1", Title: "First"},
+			{ID: "m2", Title: "Second", DependsOn: []string{"m1"}},
+		},
+		ready: [][]string{
+			{"m1", "m2"},
+			{"m1", "m2"},
+		},
+	}
+	worktrees := &fakeWorktreeManager{
+		paths: map[string]string{
+			"m1": m1Path,
+			"m2": filepath.Join(t.TempDir(), "m2"),
+		},
+	}
+	locks := &fakeSurfaceLocker{}
+	harness := &fakeHarness{}
+	verifier := &fakeVerifier{}
+	demoTokens := &fakeDemoTokenValidator{}
+	events := &fakeEventPublisher{}
+	approval := &fakeApprovalGate{
+		responses: []admiral.ApprovalResponse{
+			{Decision: admiral.ApprovalDecisionApproved},
+			{Decision: admiral.ApprovalDecisionHalted, FeedbackText: "stop after wave one"},
+		},
+	}
+	feedback := &fakeFeedbackInjector{}
+	shelver := &fakePlanShelver{}
+
+	cmd, err := New(
+		store,
+		worktrees,
+		locks,
+		harness,
+		verifier,
+		demoTokens,
+		approval,
+		feedback,
+		shelver,
+		events,
+		CommanderConfig{WIPLimit: 2},
+	)
+	if err != nil {
+		t.Fatalf("new commander: %v", err)
+	}
+
+	if err := cmd.Execute(context.Background(), "commission-1"); err == nil {
+		t.Fatal("expected halt error from wave review decision")
+	}
+	if len(harness.implementerDispatches) != 1 {
+		t.Fatalf("implementer dispatches = %d, want 1 (wave2 should not run)", len(harness.implementerDispatches))
+	}
+
+	foundHaltEvent := false
+	for _, event := range events.events {
+		if event.Type == EventCommissionHalted && event.WaveIndex == 1 {
+			foundHaltEvent = true
+			break
+		}
+	}
+	if !foundHaltEvent {
+		t.Fatal("expected commission halted event from wave review decision")
 	}
 }
 
@@ -1113,9 +1362,11 @@ type fakeDemoTokenValidator struct {
 
 type fakeApprovalGate struct {
 	response    admiral.ApprovalResponse
+	responses   []admiral.ApprovalResponse
 	err         error
 	callCount   int
 	lastRequest admiral.ApprovalRequest
+	requests    []admiral.ApprovalRequest
 	mu          sync.Mutex
 }
 
@@ -1128,8 +1379,14 @@ func (f *fakeApprovalGate) AwaitDecision(
 
 	f.callCount++
 	f.lastRequest = request
+	f.requests = append(f.requests, request)
 	if f.err != nil {
 		return admiral.ApprovalResponse{}, f.err
+	}
+	if len(f.responses) > 0 {
+		response := f.responses[0]
+		f.responses = f.responses[1:]
+		return response, nil
 	}
 	return f.response, nil
 }

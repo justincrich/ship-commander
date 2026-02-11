@@ -21,6 +21,10 @@ const (
 	EventMissionCompleted = "MISSION_COMPLETED"
 	// EventMissionHalted is emitted when a mission fails dispatch or verification.
 	EventMissionHalted = "MISSION_HALTED"
+	// EventWaveFeedbackRecorded is emitted when Admiral feedback is captured at a wave checkpoint.
+	EventWaveFeedbackRecorded = "WAVE_FEEDBACK_RECORDED"
+	// EventCommissionHalted is emitted when Admiral halts execution during wave review.
+	EventCommissionHalted = "COMMISSION_HALTED"
 	// MissionClassificationStandardOps routes mission execution through the standard implementation fast path.
 	MissionClassificationStandardOps = "STANDARD_OPS"
 	// DefaultMaxRevisions is the deterministic default revision ceiling before halting.
@@ -67,6 +71,7 @@ type Mission struct {
 	DependsOn                  []string
 	UseCaseIDs                 []string
 	SurfaceArea                []string
+	WaveFeedback               string
 	ReviewFeedback             string
 	RevisionCount              int
 	MaxRevisions               int
@@ -102,6 +107,8 @@ type Event struct {
 type DispatchRequest struct {
 	Mission      Mission
 	WorktreePath string
+	// WaveFeedback is Admiral feedback from the previous wave checkpoint.
+	WaveFeedback string
 	// ReviewerFeedback is populated when a prior review returned NEEDS_FIXES.
 	ReviewerFeedback string
 }
@@ -212,6 +219,7 @@ type Commander struct {
 	wipLimit      int
 	reviewPoll    time.Duration
 	reviewTimeout time.Duration
+	missionPaths  sync.Map
 	now           func() time.Time
 }
 
@@ -300,16 +308,33 @@ func (c *Commander) Execute(ctx context.Context, commissionID string) error {
 		return err
 	}
 
+	waveFeedback := ""
 	for i, wave := range waves {
-		if err := c.executeWave(ctx, commissionID, i+1, wave); err != nil {
+		waveIndex := i + 1
+		if err := c.executeWave(ctx, commissionID, waveIndex, wave, waveFeedback); err != nil {
 			return fmt.Errorf("execute wave %d: %w", i+1, err)
 		}
+		waveFeedback = ""
+		if i == len(waves)-1 {
+			continue
+		}
+		nextWaveFeedback, err := c.runWaveReview(ctx, commissionID, waveIndex, wave)
+		if err != nil {
+			return err
+		}
+		waveFeedback = nextWaveFeedback
 	}
 
 	return nil
 }
 
-func (c *Commander) executeWave(ctx context.Context, commissionID string, waveIndex int, missions []Mission) error {
+func (c *Commander) executeWave(
+	ctx context.Context,
+	commissionID string,
+	waveIndex int,
+	missions []Mission,
+	waveFeedback string,
+) error {
 	if len(missions) == 0 {
 		return nil
 	}
@@ -317,6 +342,7 @@ func (c *Commander) executeWave(ctx context.Context, commissionID string, waveIn
 	pending := make(map[string]Mission, len(missions))
 	order := make([]string, 0, len(missions))
 	for _, mission := range missions {
+		mission.WaveFeedback = strings.TrimSpace(waveFeedback)
 		pending[mission.ID] = mission
 		order = append(order, mission.ID)
 	}
@@ -401,6 +427,7 @@ func (c *Commander) runMission(ctx context.Context, waveIndex int, mission Missi
 		_ = c.publishHalt(ctx, waveIndex, mission.ID, HaltReasonManualHalt, fmt.Sprintf("worktree creation failed: %v", err))
 		return fmt.Errorf("create worktree for %s: %w", mission.ID, err)
 	}
+	c.missionPaths.Store(mission.ID, worktreePath)
 
 	release, err := c.locks.Acquire(ctx, mission.ID, mission.SurfaceArea)
 	if err != nil {
@@ -457,6 +484,7 @@ func (c *Commander) dispatchImplementer(
 	result, err := c.harness.DispatchImplementer(ctx, DispatchRequest{
 		Mission:          mission,
 		WorktreePath:     worktreePath,
+		WaveFeedback:     mission.WaveFeedback,
 		ReviewerFeedback: mission.ReviewFeedback,
 	})
 	if err != nil {
@@ -578,6 +606,77 @@ func (c *Commander) handleReviewVerdict(
 		)
 		return false, fmt.Errorf("unsupported reviewer verdict %q for mission %s", verdict.Decision, missionID)
 	}
+}
+
+func (c *Commander) runWaveReview(
+	ctx context.Context,
+	commissionID string,
+	waveIndex int,
+	missions []Mission,
+) (string, error) {
+	demoTokens, err := c.collectWaveDemoTokens(missions)
+	if err != nil {
+		return "", fmt.Errorf("collect wave %d demo tokens: %w", waveIndex, err)
+	}
+
+	response, err := c.approvalGate.AwaitDecision(ctx, buildWaveReviewRequest(commissionID, waveIndex, missions, demoTokens))
+	if err != nil {
+		return "", fmt.Errorf("await wave %d review decision: %w", waveIndex, err)
+	}
+
+	switch response.Decision {
+	case admiral.ApprovalDecisionApproved:
+		return "", nil
+	case admiral.ApprovalDecisionFeedback:
+		feedbackText := strings.TrimSpace(response.FeedbackText)
+		if err := c.publish(ctx, Event{
+			Type:      EventWaveFeedbackRecorded,
+			WaveIndex: waveIndex,
+			Timestamp: c.now().UTC(),
+			Message:   feedbackText,
+			NotifyTUI: true,
+		}); err != nil {
+			return "", fmt.Errorf("publish wave %d feedback: %w", waveIndex, err)
+		}
+		return feedbackText, nil
+	case admiral.ApprovalDecisionHalted, admiral.ApprovalDecisionShelved:
+		message := strings.TrimSpace(response.FeedbackText)
+		if message == "" {
+			message = fmt.Sprintf("admiral halted execution after wave %d review", waveIndex)
+		}
+		if err := c.publish(ctx, Event{
+			Type:      EventCommissionHalted,
+			WaveIndex: waveIndex,
+			Timestamp: c.now().UTC(),
+			Message:   message,
+			NotifyTUI: true,
+		}); err != nil {
+			return "", fmt.Errorf("publish commission halt after wave %d review: %w", waveIndex, err)
+		}
+		return "", fmt.Errorf("execution halted after wave %d review: %s", waveIndex, message)
+	default:
+		return "", fmt.Errorf("unsupported wave review decision %q", response.Decision)
+	}
+}
+
+func (c *Commander) collectWaveDemoTokens(missions []Mission) (map[string]string, error) {
+	demoTokens := make(map[string]string, len(missions))
+	for _, mission := range missions {
+		worktreePathRaw, ok := c.missionPaths.Load(mission.ID)
+		if !ok {
+			return nil, fmt.Errorf("worktree path missing for mission %s", mission.ID)
+		}
+		worktreePath, ok := worktreePathRaw.(string)
+		if !ok || strings.TrimSpace(worktreePath) == "" {
+			return nil, fmt.Errorf("worktree path invalid for mission %s", mission.ID)
+		}
+		token, err := readDemoToken(worktreePath, mission.ID)
+		if err != nil {
+			return nil, fmt.Errorf("read demo token for mission %s: %w", mission.ID, err)
+		}
+		demoTokens[mission.ID] = token
+	}
+	return demoTokens, nil
 }
 
 func (c *Commander) buildReviewerDispatchRequest(
@@ -946,5 +1045,45 @@ func buildApprovalRequest(
 		CoverageMap:     coverage,
 		Iteration:       1,
 		MaxIterations:   1,
+	}
+}
+
+func buildWaveReviewRequest(
+	commissionID string,
+	waveIndex int,
+	missions []Mission,
+	demoTokens map[string]string,
+) admiral.ApprovalRequest {
+	requestMissions := make([]admiral.Mission, 0, len(missions))
+	missionIDs := make([]string, 0, len(missions))
+	for _, mission := range missions {
+		requestMissions = append(requestMissions, admiral.Mission{
+			ID:                        mission.ID,
+			Title:                     mission.Title,
+			DependsOn:                 append([]string(nil), mission.DependsOn...),
+			UseCaseIDs:                append([]string(nil), mission.UseCaseIDs...),
+			Classification:            mission.Classification,
+			ClassificationRationale:   mission.ClassificationRationale,
+			ClassificationCriteria:    append([]string(nil), mission.ClassificationCriteria...),
+			ClassificationConfidence:  mission.ClassificationConfidence,
+			ClassificationNeedsReview: mission.ClassificationNeedsReview,
+		})
+		missionIDs = append(missionIDs, mission.ID)
+	}
+
+	return admiral.ApprovalRequest{
+		CommissionID:    commissionID,
+		MissionManifest: requestMissions,
+		WaveAssignments: []admiral.Wave{{
+			Index:      waveIndex,
+			MissionIDs: missionIDs,
+		}},
+		CoverageMap:   map[string]admiral.CoverageStatus{},
+		Iteration:     1,
+		MaxIterations: 1,
+		WaveReview: &admiral.WaveReview{
+			WaveIndex:  waveIndex,
+			DemoTokens: demoTokens,
+		},
 	}
 }
