@@ -336,6 +336,41 @@ func TestTransitionCreatesSpanWithRequiredAttributes(t *testing.T) {
 	}
 }
 
+func TestTransitionMissionSpanIncludesMissionEntityType(t *testing.T) {
+	t.Parallel()
+
+	spanRecorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
+	t.Cleanup(func() {
+		if err := provider.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown tracer provider: %v", err)
+		}
+	})
+
+	persister := &fakePersister{}
+	machine, err := NewMachine(persister, "commander", WithTracer(provider.Tracer("state-test")))
+	if err != nil {
+		t.Fatalf("new machine: %v", err)
+	}
+
+	if err := machine.Transition(
+		context.Background(),
+		EntityMission,
+		"MISSION-10",
+		MissionBacklog,
+		MissionInProgress,
+		"dispatch started",
+	); err != nil {
+		t.Fatalf("transition: %v", err)
+	}
+
+	span := findTransitionSpan(t, spanRecorder.Ended())
+	attrs := attributesToMap(span.Attributes())
+	if got := attrs["entity_type"]; got != string(EntityMission) {
+		t.Fatalf("entity_type = %q, want %q", got, string(EntityMission))
+	}
+}
+
 func TestTransitionRecordsErrorsAndUsesParentContext(t *testing.T) {
 	t.Parallel()
 
